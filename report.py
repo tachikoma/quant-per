@@ -1,10 +1,22 @@
+from pathlib import Path
 import pandas as pd
 import numpy as np
 from pykrx import stock
 from config import Config
 
+DEFAULT_CACHE_DIR = Path(".cache") / "backtest"
 
-def fetch_kospi_benchmark(start_date: str, end_date: str) -> pd.DataFrame:
+
+def fetch_kospi_benchmark(start_date: str, end_date: str, cache_dir=None, force_refresh=False) -> pd.DataFrame:
+    cache_base = Path(cache_dir) if cache_dir else DEFAULT_CACHE_DIR
+    cache_file = cache_base / f"kospi_{start_date}_{end_date}.parquet"
+
+    if not force_refresh and cache_file.exists():
+        try:
+            return pd.read_parquet(cache_file)
+        except Exception:
+            pass
+
     raw = stock.get_index_ohlcv_by_date(
         start_date.replace("-", ""),
         end_date.replace("-", ""),
@@ -12,7 +24,12 @@ def fetch_kospi_benchmark(start_date: str, end_date: str) -> pd.DataFrame:
     )
     df = raw.reset_index()
     df["date"] = pd.to_datetime(df["날짜"])
-    return df[["date", "종가"]].rename(columns={"종가": "kospi_close"}).set_index("date")
+    df = df[["date", "종가"]].rename(columns={"종가": "kospi_close"}).set_index("date")
+
+    cache_base.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(cache_file)
+
+    return df
 
 
 def align_to_dates(kospi: pd.DataFrame, dates: list) -> pd.DataFrame:
@@ -24,8 +41,8 @@ def align_to_dates(kospi: pd.DataFrame, dates: list) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def benchmark_strategy(history_df: pd.DataFrame, config: Config):
-    kospi = fetch_kospi_benchmark(config.start_date, config.end_date)
+def benchmark_strategy(history_df: pd.DataFrame, config: Config, cache_dir=None, force_refresh=False):
+    kospi = fetch_kospi_benchmark(config.start_date, config.end_date, cache_dir=cache_dir, force_refresh=force_refresh)
     dates = pd.to_datetime(history_df["Date"])
     k_vals = align_to_dates(kospi, dates)
 
