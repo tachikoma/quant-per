@@ -153,4 +153,8 @@ class Config:
             pbr_max=float(os.getenv("PBR_MAX", "1.5")),
             roe_min=float(os.getenv("ROE_MIN", "0.05")),
             max_turnover=float(os.getenv("MAX_TURNOVER", "1.0")),
+            use_momentum=os.getenv("USE_MOMENTUM", "false").lower() == "true",
+            momentum_window=int(os.getenv("MOMENTUM_WINDOW", "12")),
+            use_low_volatility=os.getenv("USE_LOW_VOLATILITY", "false").lower() == "true",
+            fundamental_lag_months=int(os.getenv("FUNDAMENTAL_LAG_MONTHS", "0")),
         )

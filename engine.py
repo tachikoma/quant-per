@@ -319,22 +319,26 @@ def run_backtest(market_data, config: Config):
                 to_sell = current_portfolio[:] if current_portfolio else []
                 to_keep = []
 
-            # Execute sells
+            # Execute sells (volume-based slippage)
             if to_sell:
                 sell_amount = 0
                 for asset in to_sell:
                     stock_info = first_day_df[first_day_df['code'] == asset['code']]
                     if stock_info.empty:
                         exec_sell_price = asset['buy_price'] * 0.1
+                        eff_slippage = slippage
                     else:
                         exec_sell_price = stock_info.iloc[0]['close']
+                        trade_val = stock_info.iloc[0]['trading_val']
+                        gross_sell_value = asset['shares'] * exec_sell_price
+                        eff_slippage = min(slippage, (gross_sell_value / trade_val) * 0.5) if trade_val > 0 else slippage
                     gross_sell_value = asset['shares'] * exec_sell_price
-                    net_sell_val = gross_sell_value * (1 - slippage) * (1 - sell_cost)
+                    net_sell_val = gross_sell_value * (1 - eff_slippage) * (1 - sell_cost)
                     month_cost += gross_sell_value - net_sell_val
                     sell_amount += net_sell_val
                 cash += sell_amount
 
-            # Execute buys
+            # Execute buys (volume-based slippage)
             new_portfolio = to_keep[:]
             keep_codes = {a['code'] for a in to_keep}
             n_new = n_stocks - len(to_keep)
@@ -343,7 +347,13 @@ def run_backtest(market_data, config: Config):
                 if len(new_to_buy) > 0:
                     target_cash_per_stock = cash / len(new_to_buy)
                     for _, row in new_to_buy.iterrows():
-                        exec_buy_price = row['close'] * (1 + slippage)
+                        trade_val = row['trading_val']
+                        req_shares = int(target_cash_per_stock / (row['close'] * (1 + slippage) * (1 + buy_cost)))
+                        if req_shares <= 0:
+                            continue
+                        order_value = req_shares * row['close']
+                        eff_slippage = min(slippage, (order_value / trade_val) * 0.5) if trade_val > 0 else slippage
+                        exec_buy_price = row['close'] * (1 + eff_slippage)
                         shares = int(target_cash_per_stock / (exec_buy_price * (1 + buy_cost)))
                         if shares > 0:
                             actual_cost = shares * exec_buy_price * (1 + buy_cost)
