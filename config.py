@@ -6,6 +6,43 @@ from pandas.tseries.offsets import CustomBusinessDay
 
 load_dotenv()
 
+
+def get_last_business_day() -> str:
+    today = pd.Timestamp.now().normalize()
+    for i in range(14):
+        d = today - pd.Timedelta(days=i)
+        if d.weekday() >= 5:
+            continue
+        # Check Korean holidays
+        yr = d.year
+        date_str = d.strftime("%Y-%m-%d")
+        is_holiday = False
+        for hset in KOREA_LUNAR_HOLIDAYS.values():
+            for y in [yr - 1, yr, yr + 1]:
+                if date_str in hset.get(y, []):
+                    is_holiday = True
+                    break
+            if is_holiday:
+                break
+        if is_holiday:
+            continue
+        fixed_holidays = [
+            (1, 1), (3, 1), (5, 1), (5, 5),
+            (6, 6), (8, 15), (10, 3), (10, 9), (12, 25),
+        ]
+        for m, day in fixed_holidays:
+            h = pd.Timestamp(yr, m, day)
+            if h.weekday() == 6:
+                h += pd.Timedelta(days=1)
+            elif h.weekday() == 5 and m == 5 and day == 5:
+                h += pd.Timedelta(days=2)
+            if h.date() == d.date():
+                is_holiday = True
+                break
+        if not is_holiday:
+            return date_str
+    return today.strftime("%Y-%m-%d")
+
 KOREA_LUNAR_HOLIDAYS = {
     "seollal": {
         2018: ["2018-02-15", "2018-02-16"],
@@ -82,13 +119,14 @@ class Config:
     per_max: float
     min_market_cap: int
     min_trading_val: int
+    rebalance_freq: str = "monthly"  # "monthly" or "quarterly"
     kospi_ticker: str = "1001"
 
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
             start_date=os.getenv("BACKTEST_START_DATE", "2018-01-01"),
-            end_date=os.getenv("BACKTEST_END_DATE", "2020-12-31"),
+            end_date=os.getenv("BACKTEST_END_DATE") or get_last_business_day(),
             initial_capital=int(os.getenv("INITIAL_CAPITAL", "100000000")),
             buy_cost=float(os.getenv("BUY_COST", "0.00015")),
             sell_cost=float(os.getenv("SELL_COST", "0.0023")),
@@ -98,4 +136,5 @@ class Config:
             per_max=float(os.getenv("PER_MAX", "4.00")),
             min_market_cap=int(os.getenv("MIN_MARKET_CAP", "50000000000")),
             min_trading_val=int(os.getenv("MIN_TRADING_VAL", "1000000000")),
+            rebalance_freq=os.getenv("REBALANCE_FREQ", "monthly"),
         )

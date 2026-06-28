@@ -175,57 +175,67 @@ def run_backtest(market_data, config: Config):
 
         month_cost = 0
 
-        # ── FIRST DAY: rebalance (sell old + buy new) ──
-        first_day_df = month_df[month_df['date'] == first_day]
+        # ── Determine whether to rebalance this month ──
+        month_number = current_month.month
+        is_quarter_start = month_number in [1, 4, 7, 10]
+        is_rebalance = (
+            config.rebalance_freq == 'monthly' or
+            not current_portfolio or
+            is_quarter_start
+        )
 
-        # Sell existing holdings at first_day close
-        if current_portfolio:
-            sell_amount = 0
-            for asset in current_portfolio:
-                stock_info = first_day_df[first_day_df['code'] == asset['code']]
-                if stock_info.empty:
-                    exec_sell_price = asset['buy_price'] * 0.1
-                else:
-                    exec_sell_price = stock_info.iloc[0]['close']
-                gross_sell_value = asset['shares'] * exec_sell_price
-                net_sell_val = gross_sell_value * (1 - slippage) * (1 - sell_cost)
-                month_cost += gross_sell_value - net_sell_val
-                sell_amount += net_sell_val
-            cash += sell_amount
+        if is_rebalance:
+            # ── FIRST DAY: rebalance (sell old + buy new) ──
+            first_day_df = month_df[month_df['date'] == first_day]
 
-        # Select new portfolio using first_day data
-        universe = first_day_df[
-            (~first_day_df['is_preferred']) &
-            (first_day_df['market_cap'] >= config.min_market_cap) &
-            (first_day_df['trading_val'] >= config.min_trading_val)
-        ].copy()
+            # Sell existing holdings at first_day close
+            if current_portfolio:
+                sell_amount = 0
+                for asset in current_portfolio:
+                    stock_info = first_day_df[first_day_df['code'] == asset['code']]
+                    if stock_info.empty:
+                        exec_sell_price = asset['buy_price'] * 0.1
+                    else:
+                        exec_sell_price = stock_info.iloc[0]['close']
+                    gross_sell_value = asset['shares'] * exec_sell_price
+                    net_sell_val = gross_sell_value * (1 - slippage) * (1 - sell_cost)
+                    month_cost += gross_sell_value - net_sell_val
+                    sell_amount += net_sell_val
+                cash += sell_amount
 
-        universe = universe[
-            (universe['per'] >= config.per_min) &
-            (universe['per'] <= config.per_max)
-        ]
+            # Select new portfolio using first_day data
+            universe = first_day_df[
+                (~first_day_df['is_preferred']) &
+                (first_day_df['market_cap'] >= config.min_market_cap) &
+                (first_day_df['trading_val'] >= config.min_trading_val)
+            ].copy()
 
-        selected_stocks = universe.sort_values(by='per', ascending=True).head(n_stocks)
+            universe = universe[
+                (universe['per'] >= config.per_min) &
+                (universe['per'] <= config.per_max)
+            ]
 
-        # Buy new portfolio at first_day close
-        new_portfolio = []
-        if len(selected_stocks) > 0 and cash > 0:
-            target_cash_per_stock = cash / len(selected_stocks)
-            for _, row in selected_stocks.iterrows():
-                exec_buy_price = row['close'] * (1 + slippage)
-                shares = int(target_cash_per_stock / (exec_buy_price * (1 + buy_cost)))
-                if shares > 0:
-                    actual_cost = shares * exec_buy_price * (1 + buy_cost)
-                    month_cost += actual_cost - (shares * row['close'])
-                    cash -= actual_cost
-                    new_portfolio.append({
-                        'code': row['code'],
-                        'shares': shares,
-                        'buy_price': row['close']
-                    })
+            selected_stocks = universe.sort_values(by='per', ascending=True).head(n_stocks)
 
-        current_portfolio = new_portfolio
-        total_cost_spent += month_cost
+            # Buy new portfolio at first_day close
+            new_portfolio = []
+            if len(selected_stocks) > 0 and cash > 0:
+                target_cash_per_stock = cash / len(selected_stocks)
+                for _, row in selected_stocks.iterrows():
+                    exec_buy_price = row['close'] * (1 + slippage)
+                    shares = int(target_cash_per_stock / (exec_buy_price * (1 + buy_cost)))
+                    if shares > 0:
+                        actual_cost = shares * exec_buy_price * (1 + buy_cost)
+                        month_cost += actual_cost - (shares * row['close'])
+                        cash -= actual_cost
+                        new_portfolio.append({
+                            'code': row['code'],
+                            'shares': shares,
+                            'buy_price': row['close']
+                        })
+
+            current_portfolio = new_portfolio
+            total_cost_spent += month_cost
 
         # ── LAST DAY: mark-to-market for reporting ──
         last_day_df = month_df[month_df['date'] == last_day]
@@ -261,10 +271,17 @@ def run_backtest(market_data, config: Config):
     history_df['Drawdown'] = ((history_df['Portfolio_Value'] - history_df['Peak']) / history_df['Peak']) * 100
     mdd = history_df['Drawdown'].min()
 
+    first_date = history_df['Date'].iloc[0]
+    last_date = history_df['Date'].iloc[-1]
+    years = (pd.Timestamp(last_date) - pd.Timestamp(first_date)).days / 365.25
+    final_value = int(history_df['Portfolio_Value'].iloc[-1])
+    cagr = ((final_value / initial_capital) ** (1 / years) - 1) * 100 if years > 0 else 0.0
+
     metrics = {
         "INITIAL_CAPITAL": initial_capital,
-        "FINAL_PORTFOLIO_VALUE": int(history_df['Portfolio_Value'].iloc[-1]),
+        "FINAL_PORTFOLIO_VALUE": final_value,
         "TOTAL_RETURN_PCT": history_df['Total_Return(%)'].iloc[-1],
+        "CAGR_PCT": round(cagr, 2),
         "MAX_DRAWDOWN_PCT": round(mdd, 2),
         "TOTAL_COST_IMPACT_KRW": int(total_cost_spent),
     }
