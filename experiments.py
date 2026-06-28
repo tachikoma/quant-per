@@ -10,7 +10,9 @@ def run_single(config: Config, label: str, cache_dir=None):
     print("\n" + "=" * 70)
     print(f"  실험: {label}")
     print("=" * 70)
-    print(f"  시총≥{config.min_market_cap//1e8:.0f}억, 거래대금≥{config.min_trading_val//1e8:.0f}억, PER {config.per_min}~{config.per_max}, 리밸런싱={config.rebalance_freq}")
+    print(f"  시총≥{config.min_market_cap//1e8:.0f}억, 거래대금≥{config.min_trading_val//1e8:.0f}억, PER {config.per_min}~{config.per_max}, {config.rebalance_freq}, {config.n_stocks}종목")
+    if config.use_multi_factor:
+        print(f"  멀티팩터: PBR≤{config.pbr_max}, ROE≥{config.roe_min}, 배당가점 | max_turnover={config.max_turnover}")
     print()
 
     data = fetch_rebalancing_data(
@@ -51,6 +53,9 @@ if __name__ == "__main__":
     # ── H: slippage 0.2% → 0.1% (멀티팩터, 월별, 30종목) ──
     # ── I: max_turnover=0.5 (50%만 교체, 멀티팩터, 월별, 30종목) ──
     # ── J: sell_cost 0.23% → 0.015% (멀티팩터, 월별, 30종목) ──
+    #
+    # ★ 최종 최적: PER 0~4 + 멀티팩터 + max_turnover=0.5 (CAGR 9.83%, KOSPI Alpha +112%)
+    #   .env 에 MAX_TURNOVER=0.5 설정 후 uv run python backtest.py 로 실행
 
     mf_kwargs = dict(
         per_min=0.01, per_max=12.0,

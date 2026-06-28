@@ -97,6 +97,10 @@ def print_report(history_df: pd.DataFrame, metrics: dict, config: Config):
     print(f" 연환산 수익률(CAGR): {metrics['CAGR_PCT']}%")
     print(f" 시스템 최대 낙폭 : {metrics['MAX_DRAWDOWN_PCT']}% (MDD)")
     print(f" 총 누적 거래 비용: {metrics['TOTAL_COST_IMPACT_KRW']:,} 원")
+    print(f" 포트폴리오      : PER {config.per_min}~{config.per_max}, {config.n_stocks}종목, {config.rebalance_freq}")
+    if config.use_multi_factor:
+        print(f" 멀티팩터       : PBR≤{config.pbr_max}, ROE≥{config.roe_min}, 배당가점")
+    print(f" 최대 교체율     : {config.max_turnover:.0%}")
     print("-" * 70)
 
     cols = ["Date", "Portfolio_Value", "Stock_Count", "kospi_close",

@@ -1,6 +1,8 @@
-# KOSPI/KOSDAQ 저PER 가치투자 백테스트 엔진
+# KOSPI/KOSDAQ 멀티팩터 가치투자 백테스트 엔진
 
-pykrx 기반 KRX 실제 데이터로 PER 극단값 전략을 검증하는 퀀트 백테스터입니다.
+pykrx 기반 KRX 실제 데이터로 멀티팩터 가치투자 전략을 검증하는 퀀트 백테스터입니다.
+
+**핵심 전략:** 저PER + 저PBR + 고ROE + 고배당 멀티팩터 스코어링 + 부분 리밸런싱
 
 ## 프로젝트 구조
 
@@ -33,14 +35,21 @@ cp .env.sample .env
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `KRX_ID` / `KRX_PW` | (필수) | pykrx KRX 로그인 |
-| `BACKTEST_START_DATE` | 2018-01-01 | 백테스트 시작일 |
-| `BACKTEST_END_DATE` | 2020-12-31 | 백테스트 종료일 |
+| `BACKTEST_START_DATE` | 2008-01-01 | 백테스트 시작일 |
+| `BACKTEST_END_DATE` | (마지막 영업일) | 백테스트 종료일 (미설정 시 자동) |
 | `INITIAL_CAPITAL` | 100000000 | 초기 투자금 (원) |
 | `N_STOCKS` | 30 | 포트폴리오 종목 수 |
-| `PER_MIN` / `PER_MAX` | 0.01 / 4.00 | PER 필터 |
-| `BUY_COST` | 0.00015 | 매수 수수료 |
-| `SELL_COST` | 0.0023 | 매도 수수료 + 증권거래세 |
-| `SLIPPAGE` | 0.002 | 슬리피지 |
+| `PER_MIN` / `PER_MAX` | 0.01 / 4.00 | PER 필터 (0~4 딥밸류 권장) |
+| `MIN_MARKET_CAP` | 50000000000 (500억) | 최소 시가총액 (300억 이상 권장) |
+| `MIN_TRADING_VAL` | 1000000000 (10억) | 최소 일 거래대금 |
+| `BUY_COST` | 0.00015 (0.015%) | 매수 수수료 |
+| `SELL_COST` | 0.0023 (0.23%) | 매도 수수료 + 증권거래세 |
+| `SLIPPAGE` | 0.002 (0.2%) | 슬리피지 |
+| `USE_MULTI_FACTOR` | true | 멀티팩터 스코어링 사용 여부 |
+| `PBR_MAX` | 1.5 | PBR 상한 필터 (멀티팩터) |
+| `ROE_MIN` | 0.05 (5%) | ROE 하한 필터 (멀티팩터) |
+| `REBALANCE_FREQ` | monthly | 리밸런싱 주기 (monthly / quarterly) |
+| `MAX_TURNOVER` | 1.0 | 최대 교체율 (0.0~1.0, 0.5=50%만 교체) |
 
 ## 실행
 
@@ -59,22 +68,28 @@ uv run python backtest.py
 2. **데이터 수집** (`engine.py:fetch_rebalancing_data`)
    - 매월 첫/마지막 거래일만 pinpoint 수집 (API 호출 최소화)
    - KOSPI + KOSDAQ 전 종목
-   - pykrx `get_market_cap` + `get_market_fundamental`
+   - pykrx `get_market_cap` + `get_market_fundamental` (PER, PBR, EPS, BPS, DIV)
 
 3. **백테스트** (`engine.py:run_backtest`)
-   - 월간 리밸런싱: 초일(첫 거래일) 매도 + 매수
+   - 월간/분기간 리밸런싱: 초일(첫 거래일) 매도 + 매수
    - 보통주만 (우선주 제외)
-   - 시총/거래대금/PER 필터링 후 PER 상위 N종목 선정
+   - 시총/거래대금/PER/PBR/ROE 필터링 후 멀티팩터 스코어링
+   - **멀티팩터 스코어 = rank(PER) + rank(PBR) + rank(ROE 역순) + rank(DIV 역순)**
+   - **부분 리밸런싱**: `max_turnover` 이하로만 포트폴리오 교체 (비용 절감)
    - 상장폐지 시 보수적 가정 (원금 10% 회수)
 
 4. **KOSPI 벤치마크** (`report.py:benchmark_strategy`)
    - 동일 리밸런싱 기준일의 KOSPI 지수 대비 Alpha 계산
+   - KOSPI 캐시: 증분 단일 parquet 파일
 
-## 백테스트 결과 (2018-2020, PER 0.01~4.0)
+## 백테스트 결과 (2008-01 ~ 2026-06, 최적 전략)
 
-| 지표 | 값 |
-|------|------|
-| 전략 수익률 | -32.4% |
-| KOSPI 수익률 | -7.2% |
-| Alpha | -25.2% |
-| MDD | -62.1% (2020-03) |
+**설정:** PER 0.01~4.00, 멀티팩터, PBR≤1.5, ROE≥5%, 월별, 30종목, max_turnover=0.5
+
+| 지표 | 전략 | KOSPI |
+|------|------|-------|
+| 누적 수익률 | **+466.01%** | +353.81% |
+| CAGR | **9.83%** | ~8.3% |
+| MDD | -47.31% | - |
+| Alpha | **+112.20%** | - |
+| 총 거래비용 | 194,553,303 원 | 0 |
