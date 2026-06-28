@@ -30,7 +30,8 @@ if __name__ == "__main__":
 
     data = fetch_rebalancing_data(
         config.start_date, config.end_date,
-        cache_dir=args.cache_dir, force_refresh=args.no_cache
+        cache_dir=args.cache_dir, force_refresh=args.no_cache,
+        lag_months=config.fundamental_lag_months,
     )
     print("\n데이터 수집 완료. 백테스트를 시작합니다...\n")
 

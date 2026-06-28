@@ -101,6 +101,12 @@ def print_report(history_df: pd.DataFrame, metrics: dict, config: Config):
     if config.use_multi_factor:
         print(f" 멀티팩터       : PBR≤{config.pbr_max}, ROE≥{config.roe_min}, 배당가점")
     print(f" 최대 교체율     : {config.max_turnover:.0%}")
+    if config.use_momentum:
+        print(f" 모멘텀          : {config.momentum_window}개월")
+    if config.use_low_volatility:
+        print(f" 저변동성        : 포함")
+    if config.fundamental_lag_months > 0:
+        print(f" 재무 시차       : {config.fundamental_lag_months}개월 lag")
     print("-" * 70)
 
     cols = ["Date", "Portfolio_Value", "Stock_Count", "kospi_close",

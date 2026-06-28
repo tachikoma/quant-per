@@ -128,6 +128,10 @@ class Config:
     pbr_max: float = 1.5
     roe_min: float = 0.05
     max_turnover: float = 1.0
+    fundamental_lag_months: int = 0
+    use_momentum: bool = False
+    momentum_window: int = 12
+    use_low_volatility: bool = False
     kospi_ticker: str = "1001"
 
     @classmethod

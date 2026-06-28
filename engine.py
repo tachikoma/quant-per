@@ -28,9 +28,13 @@ def _save_cache_index(cache_dir: Path, index: dict) -> None:
     index_file.write_text(json.dumps(index, indent=2, ensure_ascii=False))
 
 
-def fetch_rebalancing_data(start_date, end_date, cache_dir=None, force_refresh=False):
-    print(f"[{start_date} ~ {end_date}] 영업일 캘린더 분석 중...")
-    b_days = get_korean_business_days(start_date, end_date)
+def fetch_rebalancing_data(start_date, end_date, cache_dir=None, force_refresh=False, lag_months=0):
+    if lag_months > 0:
+        fetch_start = (pd.Timestamp(start_date) - pd.DateOffset(months=lag_months)).strftime("%Y-%m-%d")
+    else:
+        fetch_start = start_date
+    print(f"[{fetch_start} ~ {end_date}] 영업일 캘린더 분석 중... (백테스트: {start_date} ~ {end_date})")
+    b_days = get_korean_business_days(fetch_start, end_date)
     df_days = pd.DataFrame(b_days, columns=['date'])
     df_days['year_month'] = df_days['date'].dt.to_period('M')
 
@@ -153,13 +157,27 @@ def run_backtest(market_data, config: Config):
     market_data['year_month'] = market_data['date'].dt.to_period('M')
     unique_months = sorted(market_data['year_month'].unique())
 
+    # ── Pre-compute first-day close per month for momentum/volatility ──
+    monthly_close = {}
+    for ym in unique_months:
+        ym_df = market_data[market_data['year_month'] == ym]
+        first_date = sorted(ym_df['date'].unique())[0]
+        monthly_close[ym] = ym_df[ym_df['date'] == first_date].set_index('code')['close']
+
     cash = initial_capital
     current_portfolio = []
     history = []
     total_cost_spent = 0
     first_first_day = None
 
+    first_backtest_month = None
+    if config.fundamental_lag_months > 0 and len(unique_months) > config.fundamental_lag_months:
+        first_backtest_month = unique_months[config.fundamental_lag_months]
+
     for current_month in unique_months:
+        if first_backtest_month is not None and current_month < first_backtest_month:
+            continue
+
         month_df = market_data[market_data['year_month'] == current_month]
         if month_df.empty:
             continue
@@ -188,6 +206,22 @@ def run_backtest(market_data, config: Config):
         if is_rebalance:
             first_day_df = month_df[month_df['date'] == first_day]
 
+            # ── Lag fundamental data (look-ahead bias 보정) ──
+            if config.fundamental_lag_months > 0:
+                lag_period = current_month - config.fundamental_lag_months
+                lagged_df = market_data[market_data['year_month'] == lag_period]
+                if not lagged_df.empty:
+                    lag_dates = sorted(lagged_df['date'].unique())
+                    lag_fund = lagged_df[lagged_df['date'] == lag_dates[0]][['code', 'per', 'pbr', 'div', 'bps', 'eps']].copy()
+                    lag_fund.columns = ['code', 'per_lag', 'pbr_lag', 'div_lag', 'bps_lag', 'eps_lag']
+                    first_day_df = first_day_df.merge(lag_fund, on='code', how='left')
+                    first_day_df['per'] = first_day_df['per_lag']
+                    first_day_df['pbr'] = first_day_df['pbr_lag']
+                    first_day_df['div'] = first_day_df['div_lag']
+                    first_day_df['bps'] = first_day_df['bps_lag']
+                    first_day_df['eps'] = first_day_df['eps_lag']
+                    first_day_df = first_day_df.drop(columns=['per_lag', 'pbr_lag', 'div_lag', 'bps_lag', 'eps_lag'])
+
             # Select target portfolio using first_day data
             universe = first_day_df[
                 (~first_day_df['is_preferred']) &
@@ -200,6 +234,7 @@ def run_backtest(market_data, config: Config):
                 (universe['per'] <= config.per_max)
             ]
 
+            # ── Multi-factor quality filters ──
             if config.use_multi_factor:
                 for col in ['pbr', 'div', 'bps', 'eps']:
                     if col not in universe.columns:
@@ -210,30 +245,73 @@ def run_backtest(market_data, config: Config):
                     (universe['pbr'] <= config.pbr_max) &
                     (universe['roe'] >= config.roe_min)
                 ].copy()
+
+            # ── Momentum & Volatility (bias-free price-based factors) ──
+            if config.use_momentum or config.use_low_volatility:
+                if current_month in monthly_close:
+                    past_month = current_month - config.momentum_window
+                    if config.use_momentum and past_month in monthly_close:
+                        past_prices = monthly_close[past_month]
+                        universe = universe.merge(past_prices.rename('price_12m_ago'), on='code', how='left')
+                        universe['momentum'] = (universe['close'] / universe['price_12m_ago']) - 1
+                        universe = universe[universe['momentum'] > -1].copy()
+
+                    if config.use_low_volatility:
+                        vol_prices = []
+                        for idx in range(1, config.momentum_window + 1):
+                            ym = current_month - idx
+                            if ym in monthly_close:
+                                vol_prices.append(monthly_close[ym].rename(f'p_{idx}'))
+                        if len(vol_prices) >= 6:
+                            vol_df = pd.concat(vol_prices, axis=1)
+                            vol_df.columns = [f'p_{i+1}' for i in range(len(vol_prices))]
+                            monthly_returns = vol_df.pct_change(axis=1, fill_method=None).iloc[:, 1:]
+                            vol_series = monthly_returns.std(axis=1).dropna().rename('volatility')
+                            universe = universe.merge(vol_series, on='code', how='left')
+
+            # ── Dynamic scoring ──
+            score_components = []
+
+            if config.use_momentum and 'momentum' in universe.columns:
+                universe['rank_momentum'] = universe['momentum'].rank(ascending=False, pct=True)
+                score_components.append('rank_momentum')
+            else:
                 universe['rank_per'] = universe['per'].rank(pct=True)
+                score_components.append('rank_per')
+
+            if config.use_multi_factor:
                 universe['rank_pbr'] = universe['pbr'].rank(pct=True)
                 universe['rank_roe'] = universe['roe'].rank(ascending=False, pct=True)
                 universe['rank_div'] = universe['div'].fillna(0).rank(ascending=False, pct=True)
-                universe['score'] = (
-                    universe['rank_per'] + universe['rank_pbr'] +
-                    universe['rank_roe'] + universe['rank_div']
-                )
-                target_stocks = universe.sort_values(by='score').head(n_stocks)
-            else:
-                target_stocks = universe.sort_values(by='per', ascending=True).head(n_stocks)
+                score_components.extend(['rank_pbr', 'rank_roe', 'rank_div'])
+
+            if config.use_low_volatility and 'volatility' in universe.columns:
+                universe['rank_vol'] = universe['volatility'].rank(pct=True)
+                score_components.append('rank_vol')
+
+            universe['score'] = universe[score_components].sum(axis=1)
+            target_stocks = universe.sort_values(by='score').head(n_stocks)
 
             # Determine which current stocks to keep (partial turnover)
             if current_portfolio and config.max_turnover < 1.0:
                 target_codes = set(target_stocks['code'])
-                target_score = dict(zip(target_stocks['code'], target_stocks['score']))
+                if 'score' in target_stocks.columns:
+                    target_sort_key = dict(zip(target_stocks['code'], target_stocks['score']))
+                    overlap = [
+                        (a, target_sort_key[a['code']])
+                        for a in current_portfolio
+                        if a['code'] in target_codes
+                    ]
+                    overlap.sort(key=lambda x: x[1])
+                else:
+                    target_sort_key = dict(zip(target_stocks['code'], target_stocks['per']))
+                    overlap = [
+                        (a, target_sort_key[a['code']])
+                        for a in current_portfolio
+                        if a['code'] in target_codes
+                    ]
+                    overlap.sort(key=lambda x: x[1])
                 n_keep = n_stocks - max(1, int(n_stocks * config.max_turnover))
-                # Overlap stocks, sorted by score (lower=better)
-                overlap = [
-                    (a, target_score[a['code']])
-                    for a in current_portfolio
-                    if a['code'] in target_codes
-                ]
-                overlap.sort(key=lambda x: x[1])
                 keep_map = {a['code'] for a, _ in overlap[:n_keep]}
                 to_sell = [a for a in current_portfolio if a['code'] not in keep_map]
                 to_keep = [a for a in current_portfolio if a['code'] in keep_map]
