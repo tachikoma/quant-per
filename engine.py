@@ -186,25 +186,9 @@ def run_backtest(market_data, config: Config):
         )
 
         if is_rebalance:
-            # ── FIRST DAY: rebalance (sell old + buy new) ──
             first_day_df = month_df[month_df['date'] == first_day]
 
-            # Sell existing holdings at first_day close
-            if current_portfolio:
-                sell_amount = 0
-                for asset in current_portfolio:
-                    stock_info = first_day_df[first_day_df['code'] == asset['code']]
-                    if stock_info.empty:
-                        exec_sell_price = asset['buy_price'] * 0.1
-                    else:
-                        exec_sell_price = stock_info.iloc[0]['close']
-                    gross_sell_value = asset['shares'] * exec_sell_price
-                    net_sell_val = gross_sell_value * (1 - slippage) * (1 - sell_cost)
-                    month_cost += gross_sell_value - net_sell_val
-                    sell_amount += net_sell_val
-                cash += sell_amount
-
-            # Select new portfolio using first_day data
+            # Select target portfolio using first_day data
             universe = first_day_df[
                 (~first_day_df['is_preferred']) &
                 (first_day_df['market_cap'] >= config.min_market_cap) &
@@ -234,26 +218,64 @@ def run_backtest(market_data, config: Config):
                     universe['rank_per'] + universe['rank_pbr'] +
                     universe['rank_roe'] + universe['rank_div']
                 )
-                selected_stocks = universe.sort_values(by='score').head(n_stocks)
+                target_stocks = universe.sort_values(by='score').head(n_stocks)
             else:
-                selected_stocks = universe.sort_values(by='per', ascending=True).head(n_stocks)
+                target_stocks = universe.sort_values(by='per', ascending=True).head(n_stocks)
 
-            # Buy new portfolio at first_day close
-            new_portfolio = []
-            if len(selected_stocks) > 0 and cash > 0:
-                target_cash_per_stock = cash / len(selected_stocks)
-                for _, row in selected_stocks.iterrows():
-                    exec_buy_price = row['close'] * (1 + slippage)
-                    shares = int(target_cash_per_stock / (exec_buy_price * (1 + buy_cost)))
-                    if shares > 0:
-                        actual_cost = shares * exec_buy_price * (1 + buy_cost)
-                        month_cost += actual_cost - (shares * row['close'])
-                        cash -= actual_cost
-                        new_portfolio.append({
-                            'code': row['code'],
-                            'shares': shares,
-                            'buy_price': row['close']
-                        })
+            # Determine which current stocks to keep (partial turnover)
+            if current_portfolio and config.max_turnover < 1.0:
+                target_codes = set(target_stocks['code'])
+                target_score = dict(zip(target_stocks['code'], target_stocks['score']))
+                n_keep = n_stocks - max(1, int(n_stocks * config.max_turnover))
+                # Overlap stocks, sorted by score (lower=better)
+                overlap = [
+                    (a, target_score[a['code']])
+                    for a in current_portfolio
+                    if a['code'] in target_codes
+                ]
+                overlap.sort(key=lambda x: x[1])
+                keep_map = {a['code'] for a, _ in overlap[:n_keep]}
+                to_sell = [a for a in current_portfolio if a['code'] not in keep_map]
+                to_keep = [a for a in current_portfolio if a['code'] in keep_map]
+            else:
+                to_sell = current_portfolio[:] if current_portfolio else []
+                to_keep = []
+
+            # Execute sells
+            if to_sell:
+                sell_amount = 0
+                for asset in to_sell:
+                    stock_info = first_day_df[first_day_df['code'] == asset['code']]
+                    if stock_info.empty:
+                        exec_sell_price = asset['buy_price'] * 0.1
+                    else:
+                        exec_sell_price = stock_info.iloc[0]['close']
+                    gross_sell_value = asset['shares'] * exec_sell_price
+                    net_sell_val = gross_sell_value * (1 - slippage) * (1 - sell_cost)
+                    month_cost += gross_sell_value - net_sell_val
+                    sell_amount += net_sell_val
+                cash += sell_amount
+
+            # Execute buys
+            new_portfolio = to_keep[:]
+            keep_codes = {a['code'] for a in to_keep}
+            n_new = n_stocks - len(to_keep)
+            if n_new > 0 and cash > 0:
+                new_to_buy = target_stocks[~target_stocks['code'].isin(keep_codes)].head(n_new)
+                if len(new_to_buy) > 0:
+                    target_cash_per_stock = cash / len(new_to_buy)
+                    for _, row in new_to_buy.iterrows():
+                        exec_buy_price = row['close'] * (1 + slippage)
+                        shares = int(target_cash_per_stock / (exec_buy_price * (1 + buy_cost)))
+                        if shares > 0:
+                            actual_cost = shares * exec_buy_price * (1 + buy_cost)
+                            month_cost += actual_cost - (shares * row['close'])
+                            cash -= actual_cost
+                            new_portfolio.append({
+                                'code': row['code'],
+                                'shares': shares,
+                                'buy_price': row['close']
+                            })
 
             current_portfolio = new_portfolio
             total_cost_spent += month_cost

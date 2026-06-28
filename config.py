@@ -123,6 +123,7 @@ class Config:
     use_multi_factor: bool = True
     pbr_max: float = 1.5
     roe_min: float = 0.05
+    max_turnover: float = 1.0  # 0.0~1.0, fraction of portfolio to turn over per rebalance
     kospi_ticker: str = "1001"
 
     @classmethod
@@ -143,4 +144,5 @@ class Config:
             use_multi_factor=os.getenv("USE_MULTI_FACTOR", "true").lower() == "true",
             pbr_max=float(os.getenv("PBR_MAX", "1.5")),
             roe_min=float(os.getenv("ROE_MIN", "0.05")),
+            max_turnover=float(os.getenv("MAX_TURNOVER", "1.0")),
         )

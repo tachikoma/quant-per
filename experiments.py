@@ -48,56 +48,29 @@ if __name__ == "__main__":
 
     base = Config.from_env()
 
-    # ── 실험 D: 분기별 리밸런싱 + 멀티팩터 ──
-    #    비용 절감이 1순위. 복합팩터로 선별된 종목은 3개월 보유해도 문제 적음.
-    # ── 실험 F: 20종목 집중 + 멀티팩터 (월별) ──
-    #    더 적은 종목으로 우량주에 집중, 비용도 일부 절감.
-    # ── 실험 G: 분기별 + 20종목 + 멀티팩터 ──
-    #    가장 공격적인 비용 절감 조합.
+    # ── H: slippage 0.2% → 0.1% (멀티팩터, 월별, 30종목) ──
+    # ── I: max_turnover=0.5 (50%만 교체, 멀티팩터, 월별, 30종목) ──
+    # ── J: sell_cost 0.23% → 0.015% (멀티팩터, 월별, 30종목) ──
+
+    mf_kwargs = dict(
+        per_min=0.01, per_max=12.0,
+        use_multi_factor=True,
+        pbr_max=1.5, roe_min=0.05,
+        start_date="2008-01-01", end_date="2026-06-26",
+    )
 
     experiments = [
         {
-            "label": "D: 분기별 + 멀티팩터 (시총500억, 거래대금10억, PER0~12, PBR≤1.5, ROE≥5%)",
-            "config": replace(
-                base,
-                per_min=0.01,
-                per_max=12.0,
-                rebalance_freq="quarterly",
-                use_multi_factor=True,
-                pbr_max=1.5,
-                roe_min=0.05,
-                start_date="2008-01-01",
-                end_date="2026-06-26",
-            ),
+            "label": "H: slippage=0.1% (멀티팩터, 월별, 30종목)",
+            "config": replace(base, slippage=0.001, **mf_kwargs),
         },
         {
-            "label": "F: 20종목 + 멀티팩터 (월별, 시총500억, 거래대금10억, PER0~12, PBR≤1.5, ROE≥5%)",
-            "config": replace(
-                base,
-                per_min=0.01,
-                per_max=12.0,
-                n_stocks=20,
-                use_multi_factor=True,
-                pbr_max=1.5,
-                roe_min=0.05,
-                start_date="2008-01-01",
-                end_date="2026-06-26",
-            ),
+            "label": "I: max_turnover=0.5 (멀티팩터, 월별, 30종목)",
+            "config": replace(base, max_turnover=0.5, **mf_kwargs),
         },
         {
-            "label": "G: 분기별 + 20종목 + 멀티팩터 (시총500억, 거래대금10억, PER0~12, PBR≤1.5, ROE≥5%)",
-            "config": replace(
-                base,
-                per_min=0.01,
-                per_max=12.0,
-                n_stocks=20,
-                rebalance_freq="quarterly",
-                use_multi_factor=True,
-                pbr_max=1.5,
-                roe_min=0.05,
-                start_date="2008-01-01",
-                end_date="2026-06-26",
-            ),
+            "label": "J: sell_cost=0.015% (멀티팩터, 월별, 30종목)",
+            "config": replace(base, sell_cost=0.00015, **mf_kwargs),
         },
     ]
 
