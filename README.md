@@ -62,7 +62,7 @@ uv run python backtest.py
    - pykrx `get_market_cap` + `get_market_fundamental`
 
 3. **백테스트** (`engine.py:run_backtest`)
-   - 월간 리밸런싱: 말일 매도 → 초일 매수
+   - 월간 리밸런싱: 초일(첫 거래일) 매도 + 매수
    - 보통주만 (우선주 제외)
    - 시총/거래대금/PER 필터링 후 PER 상위 N종목 선정
    - 상장폐지 시 보수적 가정 (원금 10% 회수)
