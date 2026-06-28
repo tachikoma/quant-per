@@ -120,6 +120,9 @@ class Config:
     min_market_cap: int
     min_trading_val: int
     rebalance_freq: str = "monthly"  # "monthly" or "quarterly"
+    use_multi_factor: bool = True
+    pbr_max: float = 1.5
+    roe_min: float = 0.05
     kospi_ticker: str = "1001"
 
     @classmethod
@@ -137,4 +140,7 @@ class Config:
             min_market_cap=int(os.getenv("MIN_MARKET_CAP", "50000000000")),
             min_trading_val=int(os.getenv("MIN_TRADING_VAL", "1000000000")),
             rebalance_freq=os.getenv("REBALANCE_FREQ", "monthly"),
+            use_multi_factor=os.getenv("USE_MULTI_FACTOR", "true").lower() == "true",
+            pbr_max=float(os.getenv("PBR_MAX", "1.5")),
+            roe_min=float(os.getenv("ROE_MIN", "0.05")),
         )

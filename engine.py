@@ -93,13 +93,14 @@ def fetch_rebalancing_data(start_date, end_date, cache_dir=None, force_refresh=F
             df_merged = df_merged.reset_index()
             df_merged = df_merged.rename(columns={
                 '티커': 'code', '종가': 'close', '시가총액': 'market_cap',
-                '거래대금': 'trading_val', 'PER': 'per'
+                '거래대금': 'trading_val', 'PER': 'per', 'PBR': 'pbr',
+                'DIV': 'div', 'BPS': 'bps', 'EPS': 'eps'
             })
             df_merged['date'] = dt
             df_merged['code'] = df_merged['code'].astype(str)
             df_merged['is_preferred'] = ~df_merged['code'].str.endswith('0')
 
-            cols = ['date', 'code', 'close', 'market_cap', 'trading_val', 'per', 'is_preferred']
+            cols = ['date', 'code', 'close', 'market_cap', 'trading_val', 'per', 'pbr', 'div', 'bps', 'eps', 'is_preferred']
             df_merged = df_merged[cols]
 
             ym_str = str(pd.Timestamp(dt).to_period('M'))
@@ -215,7 +216,27 @@ def run_backtest(market_data, config: Config):
                 (universe['per'] <= config.per_max)
             ]
 
-            selected_stocks = universe.sort_values(by='per', ascending=True).head(n_stocks)
+            if config.use_multi_factor:
+                for col in ['pbr', 'div', 'bps', 'eps']:
+                    if col not in universe.columns:
+                        universe[col] = float('nan')
+                universe['roe'] = universe['eps'] / universe['bps']
+                universe = universe[
+                    (universe['pbr'] >= 0) &
+                    (universe['pbr'] <= config.pbr_max) &
+                    (universe['roe'] >= config.roe_min)
+                ].copy()
+                universe['rank_per'] = universe['per'].rank(pct=True)
+                universe['rank_pbr'] = universe['pbr'].rank(pct=True)
+                universe['rank_roe'] = universe['roe'].rank(ascending=False, pct=True)
+                universe['rank_div'] = universe['div'].fillna(0).rank(ascending=False, pct=True)
+                universe['score'] = (
+                    universe['rank_per'] + universe['rank_pbr'] +
+                    universe['rank_roe'] + universe['rank_div']
+                )
+                selected_stocks = universe.sort_values(by='score').head(n_stocks)
+            else:
+                selected_stocks = universe.sort_values(by='per', ascending=True).head(n_stocks)
 
             # Buy new portfolio at first_day close
             new_portfolio = []
