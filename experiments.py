@@ -57,9 +57,31 @@ if __name__ == "__main__":
 
     base = Config.from_env()
 
+    # 실험 결과 요약
+    # ──────────────────────────────────────────────────
+    # D: PER 0~4 + MF     + 4m lag → CAGR -8.87% (bias 파괴적)
+    # P1: PER 0~12 + MF   + 4m lag → CAGR -2.39%
+    # P3: MF-only + 4m lag (PER 0~99) → CAGR -1.73%
+    # M1: 모멘텀 단독                → CAGR +3.52% (bias 0)
+    # M2: 모멘텀 + 저변동성          → CAGR +8.02% ⭐ (bias 0)
+    # M3: 모멘텀 + Quality(2m lag)   → CAGR +0.63%
+    # M4: 모멘텀 + 저변동성 + Q(2m)  → CAGR +2.45%
+    # ──────────────────────────────────────────────────
+    # 최적: M2 (모멘텀+저변동성) — bias-free, 30종목 풀채움
+    # 대안: PER+MF — CAGR 10%지만 bias 리스크 있음
+
     start_kwargs = dict(start_date="2008-01-01", end_date="2026-06-26")
 
     experiments = [
+        # M2: 최적 — 모멘텀 + 저변동성 (bias-free, CAGR 8.02%)
+        {
+            "label": "M2: 모멘텀 + 저변동성",
+            "config": replace(base,
+                per_min=0.01, per_max=99.0,
+                use_multi_factor=False, use_momentum=True,
+                momentum_window=12, use_low_volatility=True,
+                max_turnover=0.5, **start_kwargs),
+        },
         # M1: 12-month momentum only (bias-free)
         {
             "label": "M1: 12m 모멘텀 단독",

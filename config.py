@@ -108,9 +108,11 @@ def get_korean_business_days(start_date, end_date):
 
 @dataclass
 class Config:
-    """멀티팩터 가치투자 백테스트 설정.
-    - PER 0~4 딥밸류 + PBR≤1.5 + ROE≥5% + 배당가점 멀티팩터 스코어링
-    - max_turnover=0.5 부분 리밸런싱으로 비용 최적화 (CAGR 9.83%, KOSPI Alpha +112%)
+    """퀀트 백테스트 설정.
+    지원 전략:
+      - PER+멀티팩터: PER 0~4 + PBR≤1.5 + ROE≥5% + 배당가점
+      - 모멘텀+저변동성: 12개월 모멘텀 + 변동성 (bias-free)
+    공통: 거래대금 기반 동적 슬리피지, max_turnover 부분 리밸런싱
     """
     start_date: str
     end_date: str
