@@ -150,7 +150,43 @@ def clear_cache(cache_dir=None):
         print("캐시 디렉토리가 존재하지 않습니다.")
 
 
-def run_backtest(market_data, config: Config):
+def _fetch_kospi_for_ma(config: Config, cache_dir=None) -> pd.DataFrame:
+    """Fetch daily KOSPI close prices with extra lookback for MA200 calculation."""
+    cache_base = Path(cache_dir) if cache_dir else DEFAULT_CACHE_DIR
+    cache_base.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_base / "kospi_ma.parquet"
+
+    req_start = pd.Timestamp(config.start_date) - pd.DateOffset(days=420)
+    req_end = pd.Timestamp(config.end_date)
+
+    if cache_file.exists():
+        try:
+            df = pd.read_parquet(cache_file)
+            df.index = pd.to_datetime(df.index)
+            idx_min, idx_max = df.index.min(), df.index.max()
+            if not pd.isna(idx_min) and not pd.isna(idx_max) and idx_min <= req_start and idx_max >= min(req_end, pd.Timestamp.now()):
+                return df
+        except Exception:
+            pass
+
+    fetch_start = req_start.strftime("%Y%m%d")
+    today = pd.Timestamp.now().normalize()
+    fetch_end = min(req_end, today).strftime("%Y%m%d")
+
+    try:
+        raw = stock.get_index_ohlcv_by_date(fetch_start, fetch_end, "1001")
+        df = raw.reset_index()
+        df["date"] = pd.to_datetime(df["날짜"])
+        df = df[["date", "종가"]].rename(columns={"종가": "kospi_close"}).set_index("date")
+        df.index.name = "date"
+        df = df[~df.index.duplicated(keep='last')].sort_index()
+        df.to_parquet(cache_file)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def run_backtest(market_data, config: Config, cache_dir=None):
     initial_capital = config.initial_capital
     buy_cost, sell_cost, slippage = config.buy_cost, config.sell_cost, config.slippage
     n_stocks = config.n_stocks
@@ -165,6 +201,11 @@ def run_backtest(market_data, config: Config):
         ym_df = market_data[market_data['year_month'] == ym]
         first_date = sorted(ym_df['date'].unique())[0]
         monthly_close[ym] = ym_df[ym_df['date'] == first_date].set_index('code')['close']
+
+    # ── KOSPI 200-day MA market regime ──
+    kospi_regime = _fetch_kospi_for_ma(config, cache_dir)
+    if not kospi_regime.empty:
+        kospi_regime['ma200'] = kospi_regime['kospi_close'].rolling(200, min_periods=200).mean()
 
     cash = initial_capital
     current_portfolio = []
@@ -196,176 +237,206 @@ def run_backtest(market_data, config: Config):
 
         month_cost = 0
 
-        # ── Determine whether to rebalance this month ──
-        month_number = current_month.month
-        is_quarter_start = month_number in [1, 4, 7, 10]
-        is_rebalance = (
-            config.rebalance_freq == 'monthly' or
-            not current_portfolio or
-            is_quarter_start
-        )
+        first_day_df = month_df[month_df['date'] == first_day]
 
-        if is_rebalance:
-            first_day_df = month_df[month_df['date'] == first_day]
+        # ── Market regime: KOSPI 200-day MA ──
+        is_bull = True
+        if not kospi_regime.empty:
+            first_ts = pd.Timestamp(first_day)
+            closest = kospi_regime[kospi_regime.index <= first_ts].tail(1)
+            if not closest.empty and closest['ma200'].notna().iloc[0]:
+                is_bull = closest['kospi_close'].iloc[0] >= closest['ma200'].iloc[0]
 
-            # ── Lag fundamental data (look-ahead bias 보정) ──
-            if config.fundamental_lag_months > 0:
-                lag_period = current_month - config.fundamental_lag_months
-                lagged_df = market_data[market_data['year_month'] == lag_period]
-                if not lagged_df.empty:
-                    lag_dates = sorted(lagged_df['date'].unique())
-                    lag_fund = lagged_df[lagged_df['date'] == lag_dates[0]][['code', 'per', 'pbr', 'div', 'bps', 'eps']].copy()
-                    lag_fund.columns = ['code', 'per_lag', 'pbr_lag', 'div_lag', 'bps_lag', 'eps_lag']
-                    first_day_df = first_day_df.merge(lag_fund, on='code', how='left')
-                    first_day_df['per'] = first_day_df['per_lag']
-                    first_day_df['pbr'] = first_day_df['pbr_lag']
-                    first_day_df['div'] = first_day_df['div_lag']
-                    first_day_df['bps'] = first_day_df['bps_lag']
-                    first_day_df['eps'] = first_day_df['eps_lag']
-                    first_day_df = first_day_df.drop(columns=['per_lag', 'pbr_lag', 'div_lag', 'bps_lag', 'eps_lag'])
+        # ── Bear market → liquidate ──
+        if not is_bull and current_portfolio:
+            sell_proceeds = 0
+            for asset in current_portfolio:
+                stock_info = first_day_df[first_day_df['code'] == asset['code']]
+                if stock_info.empty:
+                    exec_sell_price = asset['buy_price'] * 0.1
+                    eff_slippage = slippage
+                else:
+                    exec_sell_price = stock_info.iloc[0]['close']
+                    trade_val = stock_info.iloc[0]['trading_val']
+                    gross_sell_value = asset['shares'] * exec_sell_price
+                    eff_slippage = min(slippage, (gross_sell_value / trade_val) * 0.5) if trade_val > 0 else slippage
+                gross_sell_value = asset['shares'] * exec_sell_price
+                net_sell_val = gross_sell_value * (1 - eff_slippage) * (1 - sell_cost)
+                month_cost += gross_sell_value - net_sell_val
+                sell_proceeds += net_sell_val
+            cash += sell_proceeds
+            current_portfolio = []
+            total_cost_spent += month_cost
 
-            # Select target portfolio using first_day data
-            universe = first_day_df[
-                (~first_day_df['is_preferred']) &
-                (first_day_df['market_cap'] >= config.min_market_cap) &
-                (first_day_df['trading_val'] >= config.min_trading_val)
-            ].copy()
+        # ── Bull market → determine rebalance schedule ──
+        if is_bull:
+            month_number = current_month.month
+            is_quarter_start = month_number in [1, 4, 7, 10]
+            is_rebalance = (
+                config.rebalance_freq == 'monthly' or
+                not current_portfolio or
+                is_quarter_start
+            )
 
-            if config.max_market_cap > 0:
-                universe = universe[universe['market_cap'] <= config.max_market_cap]
+            if is_rebalance:
+                # ── Lag fundamental data (look-ahead bias 보정) ──
+                if config.fundamental_lag_months > 0:
+                    lag_period = current_month - config.fundamental_lag_months
+                    lagged_df = market_data[market_data['year_month'] == lag_period]
+                    if not lagged_df.empty:
+                        lag_dates = sorted(lagged_df['date'].unique())
+                        lag_fund = lagged_df[lagged_df['date'] == lag_dates[0]][['code', 'per', 'pbr', 'div', 'bps', 'eps']].copy()
+                        lag_fund.columns = ['code', 'per_lag', 'pbr_lag', 'div_lag', 'bps_lag', 'eps_lag']
+                        first_day_df = first_day_df.merge(lag_fund, on='code', how='left')
+                        first_day_df['per'] = first_day_df['per_lag']
+                        first_day_df['pbr'] = first_day_df['pbr_lag']
+                        first_day_df['div'] = first_day_df['div_lag']
+                        first_day_df['bps'] = first_day_df['bps_lag']
+                        first_day_df['eps'] = first_day_df['eps_lag']
+                        first_day_df = first_day_df.drop(columns=['per_lag', 'pbr_lag', 'div_lag', 'bps_lag', 'eps_lag'])
 
-            # ── Percentile-based fundamental filters (intersection) ──
-            if config.use_multi_factor:
-                for col in ['pbr', 'div', 'bps', 'eps']:
-                    if col not in universe.columns:
-                        universe[col] = float('nan')
-                universe['roe'] = universe['eps'] / universe['bps']
-                pbr_r = universe['pbr'].rank(pct=True)
-                universe = universe[
-                    (pbr_r <= config.pbr_pctile) &
-                    (universe['pbr'] >= 0)
+                # Select target portfolio using first_day data
+                universe = first_day_df[
+                    (~first_day_df['is_preferred']) &
+                    (first_day_df['market_cap'] >= config.min_market_cap) &
+                    (first_day_df['trading_val'] >= config.min_trading_val)
                 ].copy()
 
-            # ── Momentum & Volatility (bias-free price-based factors) ──
-            if config.use_momentum or config.use_low_volatility:
-                if current_month in monthly_close:
-                    past_month = current_month - config.momentum_window
-                    if config.use_momentum and past_month in monthly_close:
-                        past_prices = monthly_close[past_month]
-                        universe = universe.merge(past_prices.rename('price_12m_ago'), on='code', how='left')
-                        universe['momentum'] = (universe['close'] / universe['price_12m_ago']) - 1
-                        universe = universe[universe['momentum'] > -1].copy()
+                if config.max_market_cap > 0:
+                    universe = universe[universe['market_cap'] <= config.max_market_cap]
 
-                    if config.use_low_volatility:
-                        vol_prices = []
-                        for idx in range(1, config.momentum_window + 1):
-                            ym = current_month - idx
-                            if ym in monthly_close:
-                                vol_prices.append(monthly_close[ym].rename(f'p_{idx}'))
-                        if len(vol_prices) >= 6:
-                            vol_df = pd.concat(vol_prices, axis=1)
-                            vol_df.columns = [f'p_{i+1}' for i in range(len(vol_prices))]
-                            monthly_returns = vol_df.pct_change(axis=1, fill_method=None).iloc[:, 1:]
-                            vol_series = monthly_returns.std(axis=1).dropna().rename('volatility')
-                            universe = universe.merge(vol_series, on='code', how='left')
+                # ── Percentile-based fundamental filters (intersection) ──
+                if config.use_multi_factor:
+                    for col in ['pbr', 'div', 'bps', 'eps']:
+                        if col not in universe.columns:
+                            universe[col] = float('nan')
+                    universe['roe'] = universe['eps'] / universe['bps']
+                    pbr_r = universe['pbr'].rank(pct=True)
+                    universe = universe[
+                        (pbr_r <= config.pbr_pctile) &
+                        (universe['pbr'] >= 0)
+                    ].copy()
 
-            # ── Dynamic scoring ──
-            score_components = []
+                # ── Momentum & Volatility (bias-free price-based factors) ──
+                if config.use_momentum or config.use_low_volatility:
+                    if current_month in monthly_close:
+                        past_month = current_month - config.momentum_window
+                        if config.use_momentum and past_month in monthly_close:
+                            past_prices = monthly_close[past_month]
+                            universe = universe.merge(past_prices.rename('price_12m_ago'), on='code', how='left')
+                            universe['momentum'] = (universe['close'] / universe['price_12m_ago']) - 1
+                            universe = universe[universe['momentum'] > -1].copy()
 
-            if config.use_momentum and 'momentum' in universe.columns:
-                universe['rank_momentum'] = universe['momentum'].rank(ascending=False, pct=True)
-                score_components.append('rank_momentum')
-            else:
-                universe['rank_per'] = universe['per'].rank(pct=True)
-                score_components.append('rank_per')
+                        if config.use_low_volatility:
+                            vol_prices = []
+                            for idx in range(1, config.momentum_window + 1):
+                                ym = current_month - idx
+                                if ym in monthly_close:
+                                    vol_prices.append(monthly_close[ym].rename(f'p_{idx}'))
+                            if len(vol_prices) >= 6:
+                                vol_df = pd.concat(vol_prices, axis=1)
+                                vol_df.columns = [f'p_{i+1}' for i in range(len(vol_prices))]
+                                monthly_returns = vol_df.pct_change(axis=1, fill_method=None).iloc[:, 1:]
+                                vol_series = monthly_returns.std(axis=1).dropna().rename('volatility')
+                                universe = universe.merge(vol_series, on='code', how='left')
 
-            if config.use_multi_factor:
-                universe['rank_roe'] = universe['roe'].rank(ascending=False, pct=True)
-                universe['rank_div'] = universe['div'].fillna(0).rank(ascending=False, pct=True)
-                score_components.extend(['rank_roe', 'rank_div'])
+                # ── Dynamic scoring ──
+                score_components = []
 
-            if config.use_low_volatility and 'volatility' in universe.columns:
-                universe['rank_vol'] = universe['volatility'].rank(pct=True)
-                score_components.append('rank_vol')
-
-            universe['score'] = universe[score_components].sum(axis=1)
-            target_stocks = universe.sort_values(by='score').head(n_stocks)
-
-            # Determine which current stocks to keep (partial turnover)
-            if current_portfolio and config.max_turnover < 1.0:
-                target_codes = set(target_stocks['code'])
-                if 'score' in target_stocks.columns:
-                    target_sort_key = dict(zip(target_stocks['code'], target_stocks['score']))
-                    overlap = [
-                        (a, target_sort_key[a['code']])
-                        for a in current_portfolio
-                        if a['code'] in target_codes
-                    ]
-                    overlap.sort(key=lambda x: x[1])
+                if config.use_momentum and 'momentum' in universe.columns:
+                    universe['rank_momentum'] = universe['momentum'].rank(ascending=False, pct=True)
+                    score_components.append('rank_momentum')
                 else:
-                    target_sort_key = dict(zip(target_stocks['code'], target_stocks['per']))
-                    overlap = [
-                        (a, target_sort_key[a['code']])
-                        for a in current_portfolio
-                        if a['code'] in target_codes
-                    ]
-                    overlap.sort(key=lambda x: x[1])
-                n_keep = n_stocks - max(1, int(n_stocks * config.max_turnover))
-                keep_map = {a['code'] for a, _ in overlap[:n_keep]}
-                to_sell = [a for a in current_portfolio if a['code'] not in keep_map]
-                to_keep = [a for a in current_portfolio if a['code'] in keep_map]
-            else:
-                to_sell = current_portfolio[:] if current_portfolio else []
-                to_keep = []
+                    universe['rank_per'] = universe['per'].rank(pct=True)
+                    score_components.append('rank_per')
 
-            # Execute sells (volume-based slippage)
-            if to_sell:
-                sell_amount = 0
-                for asset in to_sell:
-                    stock_info = first_day_df[first_day_df['code'] == asset['code']]
-                    if stock_info.empty:
-                        exec_sell_price = asset['buy_price'] * 0.1
-                        eff_slippage = slippage
+                if config.use_multi_factor:
+                    universe['rank_roe'] = universe['roe'].rank(ascending=False, pct=True)
+                    universe['rank_div'] = universe['div'].fillna(0).rank(ascending=False, pct=True)
+                    score_components.extend(['rank_roe', 'rank_div'])
+
+                if config.use_low_volatility and 'volatility' in universe.columns:
+                    universe['rank_vol'] = universe['volatility'].rank(pct=True)
+                    score_components.append('rank_vol')
+
+                universe['score'] = universe[score_components].sum(axis=1)
+                target_stocks = universe.sort_values(by='score').head(n_stocks)
+
+                # Determine which current stocks to keep (partial turnover)
+                if current_portfolio and config.max_turnover < 1.0:
+                    target_codes = set(target_stocks['code'])
+                    if 'score' in target_stocks.columns:
+                        target_sort_key = dict(zip(target_stocks['code'], target_stocks['score']))
+                        overlap = [
+                            (a, target_sort_key[a['code']])
+                            for a in current_portfolio
+                            if a['code'] in target_codes
+                        ]
+                        overlap.sort(key=lambda x: x[1])
                     else:
-                        exec_sell_price = stock_info.iloc[0]['close']
-                        trade_val = stock_info.iloc[0]['trading_val']
+                        target_sort_key = dict(zip(target_stocks['code'], target_stocks['per']))
+                        overlap = [
+                            (a, target_sort_key[a['code']])
+                            for a in current_portfolio
+                            if a['code'] in target_codes
+                        ]
+                        overlap.sort(key=lambda x: x[1])
+                    n_keep = n_stocks - max(1, int(n_stocks * config.max_turnover))
+                    keep_map = {a['code'] for a, _ in overlap[:n_keep]}
+                    to_sell = [a for a in current_portfolio if a['code'] not in keep_map]
+                    to_keep = [a for a in current_portfolio if a['code'] in keep_map]
+                else:
+                    to_sell = current_portfolio[:] if current_portfolio else []
+                    to_keep = []
+
+                # Execute sells (volume-based slippage)
+                if to_sell:
+                    sell_amount = 0
+                    for asset in to_sell:
+                        stock_info = first_day_df[first_day_df['code'] == asset['code']]
+                        if stock_info.empty:
+                            exec_sell_price = asset['buy_price'] * 0.1
+                            eff_slippage = slippage
+                        else:
+                            exec_sell_price = stock_info.iloc[0]['close']
+                            trade_val = stock_info.iloc[0]['trading_val']
+                            gross_sell_value = asset['shares'] * exec_sell_price
+                            eff_slippage = min(slippage, (gross_sell_value / trade_val) * 0.5) if trade_val > 0 else slippage
                         gross_sell_value = asset['shares'] * exec_sell_price
-                        eff_slippage = min(slippage, (gross_sell_value / trade_val) * 0.5) if trade_val > 0 else slippage
-                    gross_sell_value = asset['shares'] * exec_sell_price
-                    net_sell_val = gross_sell_value * (1 - eff_slippage) * (1 - sell_cost)
-                    month_cost += gross_sell_value - net_sell_val
-                    sell_amount += net_sell_val
-                cash += sell_amount
+                        net_sell_val = gross_sell_value * (1 - eff_slippage) * (1 - sell_cost)
+                        month_cost += gross_sell_value - net_sell_val
+                        sell_amount += net_sell_val
+                    cash += sell_amount
 
-            # Execute buys (volume-based slippage)
-            new_portfolio = to_keep[:]
-            keep_codes = {a['code'] for a in to_keep}
-            n_new = n_stocks - len(to_keep)
-            if n_new > 0 and cash > 0:
-                new_to_buy = target_stocks[~target_stocks['code'].isin(keep_codes)].head(n_new)
-                if len(new_to_buy) > 0:
-                    target_cash_per_stock = cash / len(new_to_buy)
-                    for _, row in new_to_buy.iterrows():
-                        trade_val = row['trading_val']
-                        req_shares = int(target_cash_per_stock / (row['close'] * (1 + slippage) * (1 + buy_cost)))
-                        if req_shares <= 0:
-                            continue
-                        order_value = req_shares * row['close']
-                        eff_slippage = min(slippage, (order_value / trade_val) * 0.5) if trade_val > 0 else slippage
-                        exec_buy_price = row['close'] * (1 + eff_slippage)
-                        shares = int(target_cash_per_stock / (exec_buy_price * (1 + buy_cost)))
-                        if shares > 0:
-                            actual_cost = shares * exec_buy_price * (1 + buy_cost)
-                            month_cost += actual_cost - (shares * row['close'])
-                            cash -= actual_cost
-                            new_portfolio.append({
-                                'code': row['code'],
-                                'shares': shares,
-                                'buy_price': row['close']
-                            })
+                # Execute buys (volume-based slippage)
+                new_portfolio = to_keep[:]
+                keep_codes = {a['code'] for a in to_keep}
+                n_new = n_stocks - len(to_keep)
+                if n_new > 0 and cash > 0:
+                    new_to_buy = target_stocks[~target_stocks['code'].isin(keep_codes)].head(n_new)
+                    if len(new_to_buy) > 0:
+                        target_cash_per_stock = cash / len(new_to_buy)
+                        for _, row in new_to_buy.iterrows():
+                            trade_val = row['trading_val']
+                            req_shares = int(target_cash_per_stock / (row['close'] * (1 + slippage) * (1 + buy_cost)))
+                            if req_shares <= 0:
+                                continue
+                            order_value = req_shares * row['close']
+                            eff_slippage = min(slippage, (order_value / trade_val) * 0.5) if trade_val > 0 else slippage
+                            exec_buy_price = row['close'] * (1 + eff_slippage)
+                            shares = int(target_cash_per_stock / (exec_buy_price * (1 + buy_cost)))
+                            if shares > 0:
+                                actual_cost = shares * exec_buy_price * (1 + buy_cost)
+                                month_cost += actual_cost - (shares * row['close'])
+                                cash -= actual_cost
+                                new_portfolio.append({
+                                    'code': row['code'],
+                                    'shares': shares,
+                                    'buy_price': row['close']
+                                })
 
-            current_portfolio = new_portfolio
-            total_cost_spent += month_cost
+                current_portfolio = new_portfolio
+                total_cost_spent += month_cost
 
         # ── LAST DAY: mark-to-market for reporting ──
         last_day_df = month_df[month_df['date'] == last_day]

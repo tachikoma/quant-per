@@ -98,9 +98,17 @@ def print_report(history_df: pd.DataFrame, metrics: dict, config: Config):
     print(f" 연환산 수익률(CAGR): {metrics['CAGR_PCT']}%")
     print(f" 시스템 최대 낙폭 : {metrics['MAX_DRAWDOWN_PCT']}% (MDD)")
     print(f" 총 누적 거래 비용: {metrics['TOTAL_COST_IMPACT_KRW']:,} 원")
-    print(f" 포트폴리오      : PBR 하위 {config.pbr_pctile:.0%}, {config.n_stocks}종목, {config.rebalance_freq}")
+    portfolio_desc = f" {config.n_stocks}종목, {config.rebalance_freq}"
     if config.use_multi_factor:
-        print(" 스코어링       : PER+ROE+배당 순위 합산")
+        portfolio_desc = f"PBR 하위 {config.pbr_pctile:.0%}," + portfolio_desc
+    print(f" 포트폴리오      :{portfolio_desc}")
+
+    score_parts = ["모멘텀" if config.use_momentum else "PER"]
+    if config.use_multi_factor:
+        score_parts += ["ROE", "배당"]
+    if config.use_low_volatility:
+        score_parts.append("저변동성")
+    print(f" 스코어링       : {'+'.join(score_parts)} 순위 합산")
     print(f" 최대 교체율     : {config.max_turnover:.0%}")
     if config.use_momentum:
         print(f" 모멘텀          : {config.momentum_window}개월")

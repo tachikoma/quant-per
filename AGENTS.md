@@ -32,6 +32,7 @@ backtest.py → Config.from_env() → fetch_rebalancing_data() → run_backtest(
 - 설정은 `.env`에서 python-dotenv 로딩
 - pykrx로 KRX 실거래 데이터 수집, `.cache/backtest/market_data/{YYYY-MM}.parquet`에 캐싱
 - KOSPI 벤치마크는 `.cache/backtest/kospi.parquet` 증분 캐싱
+- KOSPI 200일 이동평균 시장 레짐 필터: 종가 < MA200이면 전량 현금화, ≥ MA200이면 정상 리밸런싱 (`_fetch_kospi_for_ma()` → `.cache/backtest/kospi_ma.parquet`)
 
 ## 설정 (.env)
 

@@ -35,7 +35,7 @@ if __name__ == "__main__":
     )
     print("\n데이터 수집 완료. 백테스트를 시작합니다...\n")
 
-    history, metrics = run_backtest(data, config)
+    history, metrics = run_backtest(data, config, cache_dir=args.cache_dir)
 
     history = benchmark_strategy(
         history, config,
