@@ -33,7 +33,9 @@ def fetch_rebalancing_data(start_date, end_date, cache_dir=None, force_refresh=F
         fetch_start = (pd.Timestamp(start_date) - pd.DateOffset(months=lag_months)).strftime("%Y-%m-%d")
     else:
         fetch_start = start_date
-    print(f"[{fetch_start} ~ {end_date}] 영업일 캘린더 분석 중... (백테스트: {start_date} ~ {end_date})")
+    today = pd.Timestamp.now().normalize()
+    display_end = min(pd.Timestamp(end_date), today).strftime("%Y-%m-%d")
+    print(f"[{fetch_start} ~ {display_end}] 영업일 캘린더 분석 중... (백테스트: {start_date} ~ {display_end})")
     b_days = get_korean_business_days(fetch_start, end_date)
     df_days = pd.DataFrame(b_days, columns=['date'])
     df_days['year_month'] = df_days['date'].dt.to_period('M')
@@ -229,21 +231,19 @@ def run_backtest(market_data, config: Config):
                 (first_day_df['trading_val'] >= config.min_trading_val)
             ].copy()
 
-            universe = universe[
-                (universe['per'] >= config.per_min) &
-                (universe['per'] <= config.per_max)
-            ]
+            if config.max_market_cap > 0:
+                universe = universe[universe['market_cap'] <= config.max_market_cap]
 
-            # ── Multi-factor quality filters ──
+            # ── Percentile-based fundamental filters (intersection) ──
             if config.use_multi_factor:
                 for col in ['pbr', 'div', 'bps', 'eps']:
                     if col not in universe.columns:
                         universe[col] = float('nan')
                 universe['roe'] = universe['eps'] / universe['bps']
+                pbr_r = universe['pbr'].rank(pct=True)
                 universe = universe[
-                    (universe['pbr'] >= 0) &
-                    (universe['pbr'] <= config.pbr_max) &
-                    (universe['roe'] >= config.roe_min)
+                    (pbr_r <= config.pbr_pctile) &
+                    (universe['pbr'] >= 0)
                 ].copy()
 
             # ── Momentum & Volatility (bias-free price-based factors) ──
@@ -280,10 +280,9 @@ def run_backtest(market_data, config: Config):
                 score_components.append('rank_per')
 
             if config.use_multi_factor:
-                universe['rank_pbr'] = universe['pbr'].rank(pct=True)
                 universe['rank_roe'] = universe['roe'].rank(ascending=False, pct=True)
                 universe['rank_div'] = universe['div'].fillna(0).rank(ascending=False, pct=True)
-                score_components.extend(['rank_pbr', 'rank_roe', 'rank_div'])
+                score_components.extend(['rank_roe', 'rank_div'])
 
             if config.use_low_volatility and 'volatility' in universe.columns:
                 universe['rank_vol'] = universe['volatility'].rank(pct=True)

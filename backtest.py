@@ -6,7 +6,7 @@ from report import benchmark_strategy, print_report
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="KOSPI/KOSDAQ PER 기반 가치투자 백테스트")
+    parser = argparse.ArgumentParser(description="KOSPI/KOSDAQ 퀀트 백테스트 엔진")
     parser.add_argument("--cache-dir", default=None,
                         help="캐시 디렉토리 경로 (기본: .cache/backtest)")
     parser.add_argument("--no-cache", action="store_true",

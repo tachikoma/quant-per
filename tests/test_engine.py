@@ -14,10 +14,9 @@ def zero_cost_config():
         sell_cost=0.0,
         slippage=0.0,
         n_stocks=30,
-        per_min=0.01,
-        per_max=4.0,
         min_market_cap=50_000_000_000,
         min_trading_val=1_000_000_000,
+        use_multi_factor=False,
     )
 
 
@@ -99,8 +98,9 @@ class TestCashRemainder:
             start_date="2020-01-01", end_date="2020-02-29",
             initial_capital=1_000_000,
             buy_cost=0.0, sell_cost=0.0, slippage=0.0,
-            n_stocks=30, per_min=0.01, per_max=4.0,
+            n_stocks=30,
             min_market_cap=50_000_000_000, min_trading_val=1_000_000_000,
+            use_multi_factor=False,
         )
 
         fd_jan, ld_jan = _make_month_dates(2020, 1)
@@ -124,8 +124,9 @@ class TestCashRemainder:
             start_date="2020-01-01", end_date="2020-02-29",
             initial_capital=1_000_000,
             buy_cost=0.00015, sell_cost=0.0023, slippage=0.002,
-            n_stocks=30, per_min=0.01, per_max=4.0,
+            n_stocks=30,
             min_market_cap=50_000_000_000, min_trading_val=1_000_000_000,
+            use_multi_factor=False,
         )
         fd_jan, ld_jan = _make_month_dates(2020, 1)
         fd_feb, ld_feb = _make_month_dates(2020, 2)

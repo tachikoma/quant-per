@@ -110,7 +110,7 @@ def get_korean_business_days(start_date, end_date):
 class Config:
     """퀀트 백테스트 설정.
     지원 전략:
-      - PER+멀티팩터: PER 0~4 + PBR≤1.5 + ROE≥5% + 배당가점
+      - PBR+멀티팩터: PBR 하위 30%, PER+ROE+배당 스코어링
       - 모멘텀+저변동성: 12개월 모멘텀 + 변동성 (bias-free)
     공통: 거래대금 기반 동적 슬리피지, max_turnover 부분 리밸런싱
     """
@@ -121,14 +121,14 @@ class Config:
     sell_cost: float
     slippage: float
     n_stocks: int
-    per_min: float
-    per_max: float
     min_market_cap: int
     min_trading_val: int
+    max_market_cap: int = 0
+    per_pctile: float = 0.2
+    pbr_pctile: float = 0.3
+    roe_pctile: float = 0.5
     rebalance_freq: str = "monthly"
     use_multi_factor: bool = True
-    pbr_max: float = 1.5
-    roe_min: float = 0.05
     max_turnover: float = 1.0
     fundamental_lag_months: int = 0
     use_momentum: bool = False
@@ -146,14 +146,14 @@ class Config:
             sell_cost=float(os.getenv("SELL_COST", "0.0023")),
             slippage=float(os.getenv("SLIPPAGE", "0.002")),
             n_stocks=int(os.getenv("N_STOCKS", "30")),
-            per_min=float(os.getenv("PER_MIN", "0.01")),
-            per_max=float(os.getenv("PER_MAX", "4.00")),
-            min_market_cap=int(os.getenv("MIN_MARKET_CAP", "50000000000")),
+            min_market_cap=int(os.getenv("MIN_MARKET_CAP", "20000000000")),
             min_trading_val=int(os.getenv("MIN_TRADING_VAL", "1000000000")),
+            max_market_cap=int(os.getenv("MAX_MARKET_CAP", "0")),
+            per_pctile=float(os.getenv("PER_PCTILE", "0.2")),
+            pbr_pctile=float(os.getenv("PBR_PCTILE", "0.3")),
+            roe_pctile=float(os.getenv("ROE_PCTILE", "0.5")),
             rebalance_freq=os.getenv("REBALANCE_FREQ", "monthly"),
             use_multi_factor=os.getenv("USE_MULTI_FACTOR", "true").lower() == "true",
-            pbr_max=float(os.getenv("PBR_MAX", "1.5")),
-            roe_min=float(os.getenv("ROE_MIN", "0.05")),
             max_turnover=float(os.getenv("MAX_TURNOVER", "1.0")),
             use_momentum=os.getenv("USE_MOMENTUM", "false").lower() == "true",
             momentum_window=int(os.getenv("MOMENTUM_WINDOW", "12")),

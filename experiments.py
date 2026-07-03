@@ -10,13 +10,13 @@ def run_single(config: Config, label: str, cache_dir=None):
     print("\n" + "=" * 70)
     print(f"  실험: {label}")
     print("=" * 70)
-    print(f"  시총≥{config.min_market_cap//1e8:.0f}억, 거래대금≥{config.min_trading_val//1e8:.0f}억, PER {config.per_min}~{config.per_max}, {config.rebalance_freq}, {config.n_stocks}종목")
+    print(f"  시총 {config.min_market_cap//1e8:.0f}억~{config.max_market_cap//1e8:.0f}억, 거래대금≥{config.min_trading_val//1e8:.0f}억, PBR 하위 {config.pbr_pctile:.0%}, {config.rebalance_freq}, {config.n_stocks}종목")
     if config.use_momentum:
         print(f"  모멘텀: {config.momentum_window}개월")
     if config.use_low_volatility:
-        print(f"  저변동성 포함")
+        print("  저변동성 포함")
     if config.use_multi_factor:
-        print(f"  멀티팩터: PBR≤{config.pbr_max}, ROE≥{config.roe_min}, 배당가점 | max_turnover={config.max_turnover}")
+        print(f"  멀티팩터: PBR 하위 {config.pbr_pctile:.0%}, PER+ROE+배당 스코어링 | max_turnover={config.max_turnover}")
     if config.fundamental_lag_months > 0:
         print(f"  펀더멘털 시차: {config.fundamental_lag_months}개월 lag")
     print()
@@ -77,7 +77,6 @@ if __name__ == "__main__":
         {
             "label": "M2: 모멘텀 + 저변동성",
             "config": replace(base,
-                per_min=0.01, per_max=99.0,
                 use_multi_factor=False, use_momentum=True,
                 momentum_window=12, use_low_volatility=True,
                 max_turnover=0.5, **start_kwargs),
@@ -86,7 +85,6 @@ if __name__ == "__main__":
         {
             "label": "M1: 12m 모멘텀 단독",
             "config": replace(base,
-                per_min=0.01, per_max=99.0,
                 use_multi_factor=False, use_momentum=True,
                 momentum_window=12, use_low_volatility=False,
                 max_turnover=0.5, **start_kwargs),
@@ -95,7 +93,6 @@ if __name__ == "__main__":
         {
             "label": "M2: 모멘텀 + 저변동성",
             "config": replace(base,
-                per_min=0.01, per_max=99.0,
                 use_multi_factor=False, use_momentum=True,
                 momentum_window=12, use_low_volatility=True,
                 max_turnover=0.5, **start_kwargs),
@@ -104,8 +101,7 @@ if __name__ == "__main__":
         {
             "label": "M3: 모멘텀 + Quality (2m lag)",
             "config": replace(base,
-                per_min=0.01, per_max=99.0,
-                use_multi_factor=True, pbr_max=1.5, roe_min=0.05,
+                use_multi_factor=True,
                 use_momentum=True, momentum_window=12,
                 use_low_volatility=False,
                 fundamental_lag_months=2,
@@ -115,8 +111,7 @@ if __name__ == "__main__":
         {
             "label": "M4: 모멘텀 + 저변동성 + Quality (2m lag)",
             "config": replace(base,
-                per_min=0.01, per_max=99.0,
-                use_multi_factor=True, pbr_max=1.5, roe_min=0.05,
+                use_multi_factor=True,
                 use_momentum=True, momentum_window=12,
                 use_low_volatility=True,
                 fundamental_lag_months=2,

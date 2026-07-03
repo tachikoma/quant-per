@@ -1,6 +1,5 @@
 from pathlib import Path
 import pandas as pd
-import numpy as np
 from pykrx import stock
 from config import Config
 
@@ -90,21 +89,23 @@ def print_report(history_df: pd.DataFrame, metrics: dict, config: Config):
     print("=" * 70)
     print("                       백테스트 결과 리포트")
     print("=" * 70)
-    print(f" 테스트 기간      : {config.start_date} ~ {config.end_date}")
+    today = pd.Timestamp.now().normalize().strftime("%Y-%m-%d")
+    actual_end = min(config.end_date, today)
+    print(f" 테스트 기간      : {config.start_date} ~ {actual_end}")
     print(f" 초기 투자 원금   : {metrics['INITIAL_CAPITAL']:,} 원")
     print(f" 최종 자산 평가액 : {metrics['FINAL_PORTFOLIO_VALUE']:,} 원")
     print(f" 누적 최종 수익률 : {metrics['TOTAL_RETURN_PCT']}%")
     print(f" 연환산 수익률(CAGR): {metrics['CAGR_PCT']}%")
     print(f" 시스템 최대 낙폭 : {metrics['MAX_DRAWDOWN_PCT']}% (MDD)")
     print(f" 총 누적 거래 비용: {metrics['TOTAL_COST_IMPACT_KRW']:,} 원")
-    print(f" 포트폴리오      : PER {config.per_min}~{config.per_max}, {config.n_stocks}종목, {config.rebalance_freq}")
+    print(f" 포트폴리오      : PBR 하위 {config.pbr_pctile:.0%}, {config.n_stocks}종목, {config.rebalance_freq}")
     if config.use_multi_factor:
-        print(f" 멀티팩터       : PBR≤{config.pbr_max}, ROE≥{config.roe_min}, 배당가점")
+        print(" 스코어링       : PER+ROE+배당 순위 합산")
     print(f" 최대 교체율     : {config.max_turnover:.0%}")
     if config.use_momentum:
         print(f" 모멘텀          : {config.momentum_window}개월")
     if config.use_low_volatility:
-        print(f" 저변동성        : 포함")
+        print(" 저변동성        : 포함")
     if config.fundamental_lag_months > 0:
         print(f" 재무 시차       : {config.fundamental_lag_months}개월 lag")
     print("-" * 70)
