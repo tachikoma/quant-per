@@ -132,11 +132,33 @@ def _fetch_financials(
     return pd.DataFrame(data.get("list", []))
 
 
+def _normalize_sj_div(sj_div: str) -> str:
+    """DART sj_div를 표준 구분으로 정규화.
+
+    실제 응답은 'IS', 'IS1', 'IS2', 'CIS', 'CIS1', 'BS1', 'CF1' 등 다양하다.
+    - IS/CIS → 'IS' (손익계산서/포괄손익계산서)
+    - BS → 'BS'
+    - CF → 'CF'
+    """
+    s = str(sj_div).upper().strip()
+    if s.startswith("BS"):
+        return "BS"
+    if s.startswith("CIS"):
+        return "IS"
+    if s.startswith("IS"):
+        return "IS"
+    if s.startswith("CF"):
+        return "CF"
+    if s.startswith("SCE"):
+        return "SCE"
+    return s
+
+
 def _extract_accounts(df: pd.DataFrame) -> dict:
     """fnlttSinglAcntAll 응답에서 주요 계정 금액(당기)을 추출.
 
     Returns:
-        {계정키: 금액(억 단위? 원)} — DART 금액은 원 단위. 계정명으로 매핑.
+        {계정키: 금액(원 단위)} — sj_div 정규화 후 계정명으로 매핑.
     """
     if df is None or df.empty:
         return {}
@@ -147,7 +169,8 @@ def _extract_accounts(df: pd.DataFrame) -> dict:
     accounts = {}
     for _, r in rows.iterrows():
         nm = str(r["account_nm"]).strip()
-        accounts.setdefault(r["sj_div"], {})[nm] = r["thstrm_amount"]
+        div = _normalize_sj_div(str(r["sj_div"]))
+        accounts.setdefault(div, {})[nm] = r["thstrm_amount"]
     return accounts
 
 
@@ -165,7 +188,7 @@ ACCOUNT_KEYS = {
     },
     "IS": {
         "revenue": ["매출액", "수익(매출액)", "영업수익", "수익"],
-        "operating_income": ["영업이익"],
+        "operating_income": ["영업이익", "영업이익(손실)", "영업손실"],
         "net_income": [
             "당기순이익",
             "반기순이익",
@@ -173,6 +196,8 @@ ACCOUNT_KEYS = {
             "당기순이익(손실)",
             "반기순이익(손실)",
             "분기순이익(손실)",
+            "지배기업의 소유주에게 귀속되는 당기순이익",
+            "지배기업의 소유주에게 귀속되는 당기순이익(손실)",
         ],
         "interest_expense": ["이자의 지급", "이자비용", "금융원가", "이자지급"],
         "depreciation": [

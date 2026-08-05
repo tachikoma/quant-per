@@ -6,7 +6,68 @@ from dart_data import (
     RPT_Q3,
     available_from,
     merge_dart_financials,
+    _extract_accounts,
+    _extract_financial_row,
+    _normalize_sj_div,
 )
+
+
+class TestSjDivNormalization:
+    def test_variants(self):
+        """DART sj_div는 IS/IS1/CIS/BS1/CF1 등 다양 → 표준 구분으로 정규화."""
+        assert _normalize_sj_div("IS") == "IS"
+        assert _normalize_sj_div("IS1") == "IS"
+        assert _normalize_sj_div("IS2") == "IS"
+        assert _normalize_sj_div("CIS") == "IS"
+        assert _normalize_sj_div("CIS1") == "IS"
+        assert _normalize_sj_div("BS") == "BS"
+        assert _normalize_sj_div("BS1") == "BS"
+        assert _normalize_sj_div("CF") == "CF"
+        assert _normalize_sj_div("CF1") == "CF"
+        assert _normalize_sj_div("SCE") == "SCE"
+
+    def test_extract_with_variants(self):
+        """IS1/CIS에서 IS 계정(영업이익 등) 추출이 동작해야 한다."""
+        df = pd.DataFrame(
+            [
+                {"sj_div": "IS1", "account_nm": "매출액", "thstrm_amount": "1000"},
+                {
+                    "sj_div": "IS1",
+                    "account_nm": "영업이익(손실)",
+                    "thstrm_amount": "-200",
+                },
+                {"sj_div": "CIS", "account_nm": "당기순이익", "thstrm_amount": "300"},
+                {"sj_div": "BS1", "account_nm": "자본총계", "thstrm_amount": "5000"},
+                {
+                    "sj_div": "CF1",
+                    "account_nm": "영업활동현금흐름",
+                    "thstrm_amount": "700",
+                },
+            ]
+        )
+        accts = _extract_accounts(df)
+        assert "IS" in accts
+        row = _extract_financial_row(accts)
+        assert row["revenue"] == 1000
+        assert row["operating_income"] == -200
+        assert row["net_income"] == 300
+        assert row["total_equity"] == 5000
+        assert row["operating_cf"] == 700
+
+    def test_negative_oi_account(self):
+        """'영업이익(손실)' 계정명이 운영이익으로 매핑되어야 한다."""
+        df = pd.DataFrame(
+            [
+                {
+                    "sj_div": "IS",
+                    "account_nm": "영업이익(손실)",
+                    "thstrm_amount": "-150",
+                },
+            ]
+        )
+        accts = _extract_accounts(df)
+        row = _extract_financial_row(accts)
+        assert row["operating_income"] == -150
 
 
 class TestAvailableFrom:

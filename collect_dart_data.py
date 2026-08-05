@@ -39,6 +39,11 @@ def parse_args():
     )
     p.add_argument("--force-refresh", action="store_true", help="캐시 무시하고 재수집")
     p.add_argument(
+        "--reparse-incomplete",
+        action="store_true",
+        help="운영이익 등 핵심 지표가 누락된 행만 재조회 (IS 매핑 수정 후 사용)",
+    )
+    p.add_argument(
         "--sleep-per-call",
         type=float,
         default=0.07,
@@ -90,6 +95,12 @@ def main():
             cc_df = cached[cached["corp_code"] == cc]
             have = set(cc_df["year"])
             missing_years = [y for y in years if y not in have]
+            if args.reparse_incomplete:
+                # 핵심 지표(운영이익) 누락 행도 재조회 대상에 포함
+                incomplete = pd.DataFrame(cc_df)[
+                    pd.DataFrame(cc_df)["operating_income"].isna()
+                ]["year"]
+                missing_years = sorted(set(missing_years) | set(incomplete))
         else:
             missing_years = years
         if missing_years:
@@ -151,7 +162,7 @@ def main():
                         cc,
                         y,
                         cache_dir=cache_base,
-                        force_refresh=args.force_refresh,
+                        force_refresh=args.force_refresh or args.reparse_incomplete,
                     )
                     if row:
                         ok += 1
