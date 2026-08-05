@@ -1,25 +1,30 @@
 # KOSPI/KOSDAQ 퀀트 백테스트 엔진
 
-pykrx 기반 KRX 데이터로 가치투자/모멘텀 전략을 검증하는 퀀트 백테스터입니다.
+pykrx 기반 KRX 실거래 데이터 + DART 재무제표로 가치투자/모멘텀 전략을 검증하는 퀀트 백테스터입니다.
 
 **지원 전략:**
 | 전략 | 필터 | 스코어링 | Bias |
 |------|------|---------|:----:|
 | PBR+멀티팩터 | PBR 하위 30% + PBR≥0 | PER + ROE + 배당 순위 합산 | ⚠️ |
 | 모멘텀+저변동성 | 시총/거래대금 | 12개월 모멘텀 + 변동성 | ✅ 없음 |
+| 카스넬슨 가치투자 | ROIC, D/E, 이자보상, EV/EBITDA | FCF Yield + EV/EBITDA + PER + NCAV | ✅ 공시일 lag |
 
-두 전략은 `.env`에서 블록 주석 전환으로 간편히 스위칭 가능합니다.
+전략은 `.env`에서 블록 주석 전환으로 간편히 스위칭 가능합니다.
 
 ## 프로젝트 구조
 
 ```
-├── backtest.py      # 메인 실행 스크립트
-├── config.py        # 한국 휴장일 캘린더 + Config dataclass + .env 로딩
-├── engine.py        # 데이터 수집(fetch) + 백테스트 로직(run)
-├── report.py        # KOSPI 벤치마크 비교 + 결과 리포트 출력
-├── pyproject.toml   # 프로젝트 메타데이터 및 의존성
-├── .env             # 전략 파라미터 (KRX_ID, PER 범위, 자본금 등)
-└── .env.sample      # .env 예시 (secret 제외)
+├── backtest.py          # 메인 실행 스크립트
+├── config.py            # 한국 휴장일 캘린더 + Config dataclass + .env 로딩
+├── engine.py            # 데이터 수집(fetch) + 백테스트 로직(run)
+├── dart_data.py         # DART API 연동 + 재무제표 수집/캐싱 + 공시일 lag
+├── metrics.py           # 카스넬슨 재무 지표 계산 (ROIC, FCF, EV/EBITDA 등)
+├── collect_dart_data.py # DART 재무제표 배치 수집 (일 20,000건 한도 준수)
+├── report.py            # KOSPI 벤치마크 비교 + 결과 리포트 출력
+├── experiments.py       # 배치 실험 (전략 비교)
+├── pyproject.toml       # 프로젝트 메타데이터 및 의존성
+├── .env                 # 전략 파라미터 (KRX_ID, DART_API_KEY 등)
+└── .env.sample          # .env 예시 (secret 제외)
 ```
 
 ## 설치
@@ -43,6 +48,7 @@ cp .env.sample .env
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `KRX_ID` / `KRX_PW` | (필수) | pykrx KRX 로그인 |
+| `DART_API_KEY` | (카스넬슨 필수) | opendart.fss.go.kr 발급 키 |
 | `BACKTEST_START_DATE` | 2008-01-01 | 백테스트 시작일 |
 | `BACKTEST_END_DATE` | (마지막 영업일) | 백테스트 종료일 (미설정 시 자동) |
 | `INITIAL_CAPITAL` | 100000000 | 초기 투자금 (원) |
@@ -57,17 +63,21 @@ cp .env.sample .env
 | `REBALANCE_FREQ` | monthly | 리밸런싱 주기 (monthly / quarterly) |
 | `MAX_TURNOVER` | 1.0 | 최대 교체율 (0.5=50%만 교체) |
 | `USE_MULTI_FACTOR` | true | 멀티팩터 스코어링 (PER/ROE/배당) 사용 |
-| `PER_PCTILE` | 0.2 | PER 하위 백분위 (MF 스코어링용) |
-| `ROE_PCTILE` | 0.5 | ROE 상위 백분위 (MF 스코어링용) |
 | `USE_MOMENTUM` | false | 12개월 모멘텀 팩터 사용 |
-| `MOMENTUM_WINDOW` | 12 | 모멘텀 측정 기간 (개월) |
 | `USE_LOW_VOLATILITY` | false | 저변동성 팩터 사용 |
+| `USE_KATSENELSON` | false | 카스넬슨 가치투자 (DART 재무제표) |
+| `MIN_ROIC` | 0.10 | 카스넬슨: ROIC 하한 |
+| `MAX_DEBT_EQUITY` | 1.5 | 카스넬슨: 차입금/자본 비율 상한 |
+| `MIN_INTEREST_COVERAGE` | 2.0 | 카스넬슨: 이자보상배율 하한 |
+| `MAX_EV_EBITDA` | 20.0 | 카스넬슨: EV/EBITDA 상한 (0=미적용) |
 | `FUNDAMENTAL_LAG_MONTHS` | 0 | 재무데이터 시차 보정 (실험용) |
 
 ## 실행
 
 ```bash
-uv run python backtest.py
+uv run python backtest.py          # 기본 백테스트
+uv run python collect_dart_data.py # DART 재무제표 수집 (카스넬슨 전용)
+uv run python experiments.py       # 배치 실험
 ```
 
 ## 엔진 동작 방식
@@ -84,10 +94,16 @@ uv run python backtest.py
    - pykrx `get_market_cap` + `get_market_fundamental` (PER, PBR, EPS, BPS, DIV)
    - `lag_months` 설정 시 시작일을 앞당겨 과거 펀더멘털 데이터 확보
 
-3. **백테스트** (`engine.py:run_backtest`)
+3. **DART 재무제표 수집** (`dart_data.py` + `collect_dart_data.py`)
+   - `corpCode.xml` → corp_code(8) ↔ ticker(6) 매핑 캐싱
+   - `fnlttSinglAcntAll.json` → 연간 사업보고서 BS/IS/CF 계정 추출
+   - **공시일 기반 look-ahead bias 방지**: 사업보고서(12월 결산)는 다음해 4월 15일부터 사용
+   - 일 20,000건 / 분당 1,000회 API 한도 자동 준수
+
+4. **백테스트** (`engine.py:run_backtest`)
    - 월간/분기간 리밸런싱: 초일(첫 거래일) 매도 + 매수
    - 보통주만 (우선주 제외)
-   - 시총/거래대금 필터링 → **PBR 백분위 필터** → **멀티팩터 스코어링**으로 종목 선정
+   - 시총/거래대금 필터링 → 전략별 필터/스코어링으로 종목 선정
    - **거래대금 기반 슬리피지**: 주문금액/일거래대금 × 0.5 (cap=SLIPPAGE)
    - **부분 리밸런싱**: `max_turnover` 이하로만 포트폴리오 교체 (비용 절감)
    - 상장폐지 시 보수적 가정 (원금 10% 회수)
@@ -99,9 +115,9 @@ uv run python backtest.py
 | PBR+멀티팩터 | PBR 하위 30% + PBR≥0, 시총 200억~1조, 거래대금≥10억 | `rank(PER) + rank(ROE↓) + rank(DIV↓)` |
 | 모멘텀 단독 | 시총/거래대금/우선주 제외만 | `rank(모멘텀↓)` |
 | 모멘텀+저변동성 | 시총/거래대금/우선주 제외만 | `rank(모멘텀↓) + rank(변동성)` |
-| 모멘텀+Quality | 시총/거래대금/우선주 제외만 | `rank(모멘텀↓) + rank(ROE↓) + rank(DIV↓)` |
+| 카스넬슨 가치투자 | ROIC≥MIN, D/E≤MAX, 이자보상≥MIN, (EV/EBITDA≤MAX) | `rank(EBITDA↓) + rank(PER↓) + rank(FCF Yield↓) + rank(NCAV↓)` |
 
-4. **KOSPI 벤치마크** (`report.py:benchmark_strategy`)
+5. **KOSPI 벤치마크** (`report.py:benchmark_strategy`)
    - 동일 리밸런싱 기준일의 KOSPI 지수 대비 Alpha 계산
    - KOSPI 캐시: 증분 단일 parquet 파일
 
@@ -136,3 +152,4 @@ uv run python backtest.py
 |:----:|:---------:|------|
 | 1,000만원↑ | 모멘텀+저변동성 | bias-free, 30종목 분산 가능 |
 | 소액 | PBR+멀티팩터 | 저가주 위주 |
+| 장기 투자 | 카스넬슨 가치투자 | DART 재무제표 기반 품질+가치 |

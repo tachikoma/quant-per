@@ -27,8 +27,15 @@ def get_last_business_day() -> str:
         if is_holiday:
             continue
         fixed_holidays = [
-            (1, 1), (3, 1), (5, 1), (5, 5),
-            (6, 6), (8, 15), (10, 3), (10, 9), (12, 25),
+            (1, 1),
+            (3, 1),
+            (5, 1),
+            (5, 5),
+            (6, 6),
+            (8, 15),
+            (10, 3),
+            (10, 9),
+            (12, 25),
         ]
         for m, day in fixed_holidays:
             h = pd.Timestamp(yr, m, day)
@@ -42,6 +49,7 @@ def get_last_business_day() -> str:
         if not is_holiday:
             return date_str
     return today.strftime("%Y-%m-%d")
+
 
 KOREA_LUNAR_HOLIDAYS = {
     "seollal": {
@@ -84,9 +92,17 @@ def get_korean_business_days(start_date, end_date):
     start_yr = pd.Timestamp(start_date).year
     end_yr = pd.Timestamp(end_date).year
     holiday_set = set()
-    fixed = [(1, 1, "신정"), (3, 1, "삼일절"), (5, 1, "근로자의날"),
-             (5, 5, "어린이날"), (6, 6, "현충일"), (8, 15, "광복절"),
-             (10, 3, "개천절"), (10, 9, "한글날"), (12, 25, "크리스마스")]
+    fixed = [
+        (1, 1, "신정"),
+        (3, 1, "삼일절"),
+        (5, 1, "근로자의날"),
+        (5, 5, "어린이날"),
+        (6, 6, "현충일"),
+        (8, 15, "광복절"),
+        (10, 3, "개천절"),
+        (10, 9, "한글날"),
+        (12, 25, "크리스마스"),
+    ]
     for year in range(start_yr, end_yr + 1):
         for month, day, _ in fixed:
             d = pd.Timestamp(year, month, day)
@@ -101,8 +117,9 @@ def get_korean_business_days(start_date, end_date):
             for h in KOREA_LUNAR_HOLIDAYS.get(key, {}).get(year, []):
                 holiday_set.add(h)
     return pd.date_range(
-        start=start_date, end=end_date,
-        freq=CustomBusinessDay(holidays=sorted(holiday_set))
+        start=start_date,
+        end=end_date,
+        freq=CustomBusinessDay(holidays=sorted(holiday_set)),
     )
 
 
@@ -112,8 +129,10 @@ class Config:
     지원 전략:
       - PBR+멀티팩터: PBR 하위 30%, PER+ROE+배당 스코어링
       - 모멘텀+저변동성: 12개월 모멘텀 + 변동성 (bias-free)
+      - 카스넬슨 가치투자: ROIC/FCF/EV-EBITDA 품질+가치 스코어링 (DART 재무제표)
     공통: 거래대금 기반 동적 슬리피지, max_turnover 부분 리밸런싱
     """
+
     start_date: str
     end_date: str
     initial_capital: int
@@ -135,6 +154,14 @@ class Config:
     momentum_window: int = 12
     use_low_volatility: bool = False
     kospi_ticker: str = "1001"
+    dart_api_key: str = ""
+    use_katsenelson: bool = False
+    min_roic: float = 0.10
+    max_debt_equity: float = 1.5
+    min_fcf_yield: float = 0.0
+    min_interest_coverage: float = 2.0
+    max_ev_ebitda: float = 20.0
+    earnings_stability_years: int = 5
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -157,6 +184,15 @@ class Config:
             max_turnover=float(os.getenv("MAX_TURNOVER", "1.0")),
             use_momentum=os.getenv("USE_MOMENTUM", "false").lower() == "true",
             momentum_window=int(os.getenv("MOMENTUM_WINDOW", "12")),
-            use_low_volatility=os.getenv("USE_LOW_VOLATILITY", "false").lower() == "true",
+            use_low_volatility=os.getenv("USE_LOW_VOLATILITY", "false").lower()
+            == "true",
             fundamental_lag_months=int(os.getenv("FUNDAMENTAL_LAG_MONTHS", "0")),
+            dart_api_key=os.getenv("DART_API_KEY", ""),
+            use_katsenelson=os.getenv("USE_KATSENELSON", "false").lower() == "true",
+            min_roic=float(os.getenv("MIN_ROIC", "0.10")),
+            max_debt_equity=float(os.getenv("MAX_DEBT_EQUITY", "1.5")),
+            min_fcf_yield=float(os.getenv("MIN_FCF_YIELD", "0.0")),
+            min_interest_coverage=float(os.getenv("MIN_INTEREST_COVERAGE", "2.0")),
+            max_ev_ebitda=float(os.getenv("MAX_EV_EBITDA", "20.0")),
+            earnings_stability_years=int(os.getenv("EARNINGS_STABILITY_YEARS", "5")),
         )

@@ -13,6 +13,8 @@ dependencies = [
     "tqdm>=4.66.0",
     "python-dotenv>=1.0.1",
     "pyarrow>=14.0.0",
+    "requests>=2.31.0",
+    "lxml>=5.0.0",
 ]
 
 # 패키징 빌드 시스템 (uv의 기본값인 hatchling 사용)

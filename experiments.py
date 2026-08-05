@@ -10,28 +10,33 @@ def run_single(config: Config, label: str, cache_dir=None):
     print("\n" + "=" * 70)
     print(f"  실험: {label}")
     print("=" * 70)
-    print(f"  시총 {config.min_market_cap//1e8:.0f}억~{config.max_market_cap//1e8:.0f}억, 거래대금≥{config.min_trading_val//1e8:.0f}억, PBR 하위 {config.pbr_pctile:.0%}, {config.rebalance_freq}, {config.n_stocks}종목")
+    print(
+        f"  시총 {config.min_market_cap // 1e8:.0f}억~{config.max_market_cap // 1e8:.0f}억, 거래대금≥{config.min_trading_val // 1e8:.0f}억, PBR 하위 {config.pbr_pctile:.0%}, {config.rebalance_freq}, {config.n_stocks}종목"
+    )
     if config.use_momentum:
         print(f"  모멘텀: {config.momentum_window}개월")
     if config.use_low_volatility:
         print("  저변동성 포함")
     if config.use_multi_factor:
-        print(f"  멀티팩터: PBR 하위 {config.pbr_pctile:.0%}, PER+ROE+배당 스코어링 | max_turnover={config.max_turnover}")
+        print(
+            f"  멀티팩터: PBR 하위 {config.pbr_pctile:.0%}, PER+ROE+배당 스코어링 | max_turnover={config.max_turnover}"
+        )
     if config.fundamental_lag_months > 0:
         print(f"  펀더멘털 시차: {config.fundamental_lag_months}개월 lag")
     print()
 
     data = fetch_rebalancing_data(
-        config.start_date, config.end_date,
-        cache_dir=cache_dir, force_refresh=False,
+        config.start_date,
+        config.end_date,
+        cache_dir=cache_dir,
+        force_refresh=False,
         lag_months=config.fundamental_lag_months,
     )
 
-    history, metrics = run_backtest(data, config)
+    history, metrics = run_backtest(data, config, cache_dir=cache_dir)
 
     history = benchmark_strategy(
-        history, config,
-        cache_dir=cache_dir, force_refresh=False
+        history, config, cache_dir=cache_dir, force_refresh=False
     )
 
     print_report(history, metrics, config)
@@ -41,10 +46,12 @@ def run_single(config: Config, label: str, cache_dir=None):
 def parse_args():
     parser = argparse.ArgumentParser(description="백테스트 실험 배치 실행")
     parser.add_argument("--cache-dir", default=None)
-    parser.add_argument("--no-cache", action="store_true",
-                        help="캐시 사용하지 않고 전체 데이터 다시 다운로드")
-    parser.add_argument("--clear-cache", action="store_true",
-                        help="캐시 전체 삭제")
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="캐시 사용하지 않고 전체 데이터 다시 다운로드",
+    )
+    parser.add_argument("--clear-cache", action="store_true", help="캐시 전체 삭제")
     return parser.parse_args()
 
 
@@ -69,6 +76,9 @@ if __name__ == "__main__":
     # ──────────────────────────────────────────────────
     # 최적: M2 (모멘텀+저변동성) — bias-free, 30종목 풀채움
     # 대안: PER+MF — CAGR 10%지만 bias 리스크 있음
+    #
+    # 카스넬슨 (DART 재무제표 기반, 공시일 lag 자동 적용):
+    # K1~K4는 먼저 `uv run python collect_dart_data.py`로 재무제표 수집 필요
 
     start_kwargs = dict(start_date="2008-01-01", end_date="2026-06-26")
 
@@ -76,46 +86,105 @@ if __name__ == "__main__":
         # M2: 최적 — 모멘텀 + 저변동성 (bias-free, CAGR 8.02%)
         {
             "label": "M2: 모멘텀 + 저변동성",
-            "config": replace(base,
-                use_multi_factor=False, use_momentum=True,
-                momentum_window=12, use_low_volatility=True,
-                max_turnover=0.5, **start_kwargs),
+            "config": replace(
+                base,
+                use_multi_factor=False,
+                use_momentum=True,
+                momentum_window=12,
+                use_low_volatility=True,
+                max_turnover=0.5,
+                **start_kwargs,
+            ),
         },
         # M1: 12-month momentum only (bias-free)
         {
             "label": "M1: 12m 모멘텀 단독",
-            "config": replace(base,
-                use_multi_factor=False, use_momentum=True,
-                momentum_window=12, use_low_volatility=False,
-                max_turnover=0.5, **start_kwargs),
+            "config": replace(
+                base,
+                use_multi_factor=False,
+                use_momentum=True,
+                momentum_window=12,
+                use_low_volatility=False,
+                max_turnover=0.5,
+                **start_kwargs,
+            ),
         },
-        # M2: momentum + low volatility
+        # K1: 카스넬슨 가치투자 기본 (ROIC+FCF+EV/EBITDA 품질+가치)
         {
-            "label": "M2: 모멘텀 + 저변동성",
-            "config": replace(base,
-                use_multi_factor=False, use_momentum=True,
-                momentum_window=12, use_low_volatility=True,
-                max_turnover=0.5, **start_kwargs),
+            "label": "K1: 카스넬슨 가치투자",
+            "config": replace(
+                base,
+                use_katsenelson=True,
+                use_multi_factor=False,
+                use_momentum=False,
+                use_low_volatility=False,
+                min_roic=0.05,
+                max_ev_ebitda=15.0,
+                min_interest_coverage=2.0,
+                max_turnover=0.5,
+                **start_kwargs,
+            ),
+        },
+        # K2: 카스넬슨 + 모멘텀 결합
+        {
+            "label": "K2: 카스넬슨 + 모멘텀",
+            "config": replace(
+                base,
+                use_katsenelson=True,
+                use_multi_factor=False,
+                use_momentum=True,
+                momentum_window=12,
+                use_low_volatility=False,
+                min_roic=0.05,
+                max_ev_ebitda=15.0,
+                min_interest_coverage=2.0,
+                max_turnover=0.5,
+                **start_kwargs,
+            ),
+        },
+        # K3: 카스넬슨 + 저변동성
+        {
+            "label": "K3: 카스넬슨 + 저변동성",
+            "config": replace(
+                base,
+                use_katsenelson=True,
+                use_multi_factor=False,
+                use_momentum=False,
+                use_low_volatility=True,
+                min_roic=0.05,
+                max_ev_ebitda=15.0,
+                min_interest_coverage=2.0,
+                max_turnover=0.5,
+                **start_kwargs,
+            ),
         },
         # M3: momentum + quality (2m lag)
         {
             "label": "M3: 모멘텀 + Quality (2m lag)",
-            "config": replace(base,
+            "config": replace(
+                base,
                 use_multi_factor=True,
-                use_momentum=True, momentum_window=12,
+                use_momentum=True,
+                momentum_window=12,
                 use_low_volatility=False,
                 fundamental_lag_months=2,
-                max_turnover=0.5, **start_kwargs),
+                max_turnover=0.5,
+                **start_kwargs,
+            ),
         },
         # M4: momentum + low vol + quality (2m lag)
         {
             "label": "M4: 모멘텀 + 저변동성 + Quality (2m lag)",
-            "config": replace(base,
+            "config": replace(
+                base,
                 use_multi_factor=True,
-                use_momentum=True, momentum_window=12,
+                use_momentum=True,
+                momentum_window=12,
                 use_low_volatility=True,
                 fundamental_lag_months=2,
-                max_turnover=0.5, **start_kwargs),
+                max_turnover=0.5,
+                **start_kwargs,
+            ),
         },
     ]
 

@@ -9,7 +9,9 @@ DEFAULT_CACHE_DIR = Path(".cache") / "backtest"
 KOSPI_CACHE_FILE = "kospi.parquet"
 
 
-def fetch_kospi_benchmark(start_date: str, end_date: str, cache_dir=None, force_refresh=False) -> pd.DataFrame:
+def fetch_kospi_benchmark(
+    start_date: str, end_date: str, cache_dir=None, force_refresh=False
+) -> pd.DataFrame:
     cache_base = Path(cache_dir) if cache_dir else DEFAULT_CACHE_DIR
     cache_base.mkdir(parents=True, exist_ok=True)
     cache_file = cache_base / KOSPI_CACHE_FILE
@@ -50,7 +52,11 @@ def fetch_kospi_benchmark(start_date: str, end_date: str, cache_dir=None, force_
     raw = stock.get_index_ohlcv_by_date(fetch_start, fetch_end, "1001")
     df_new = raw.reset_index()
     df_new["date"] = pd.to_datetime(df_new["날짜"])
-    df_new = df_new[["date", "종가"]].rename(columns={"종가": "kospi_close"}).set_index("date")
+    df_new = (
+        df_new[["date", "종가"]]
+        .rename(columns={"종가": "kospi_close"})
+        .set_index("date")
+    )
     df_new.index.name = "date"
 
     merged = pd.concat([existing, df_new])
@@ -69,8 +75,15 @@ def align_to_dates(kospi: pd.DataFrame, dates: list) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def benchmark_strategy(history_df: pd.DataFrame, config: Config, cache_dir=None, force_refresh=False):
-    kospi = fetch_kospi_benchmark(config.start_date, config.end_date, cache_dir=cache_dir, force_refresh=force_refresh)
+def benchmark_strategy(
+    history_df: pd.DataFrame, config: Config, cache_dir=None, force_refresh=False
+):
+    kospi = fetch_kospi_benchmark(
+        config.start_date,
+        config.end_date,
+        cache_dir=cache_dir,
+        force_refresh=force_refresh,
+    )
     dates = pd.to_datetime(history_df["Date"])
     k_vals = align_to_dates(kospi, dates)
 
@@ -104,11 +117,18 @@ def print_report(history_df: pd.DataFrame, metrics: dict, config: Config):
     print(f" 포트폴리오      :{portfolio_desc}")
 
     score_parts = ["모멘텀" if config.use_momentum else "PER"]
-    if config.use_multi_factor:
+    if config.use_katsenelson:
+        score_parts = ["ROIC", "FCF Yield", "EV/EBITDA", "NCAV"]
+    elif config.use_multi_factor:
         score_parts += ["ROE", "배당"]
     if config.use_low_volatility:
         score_parts.append("저변동성")
     print(f" 스코어링       : {'+'.join(score_parts)} 순위 합산")
+    if config.use_katsenelson:
+        print(
+            f" 카스넬슨 필터  : ROIC>={config.min_roic:.0%}, D/E<={config.max_debt_equity:.1f}, "
+            f"이자보상>={config.min_interest_coverage:.0f}, EV/EBITDA<={config.max_ev_ebitda:.0f}"
+        )
     print(f" 최대 교체율     : {config.max_turnover:.0%}")
     if config.use_momentum:
         print(f" 모멘텀          : {config.momentum_window}개월")
@@ -118,8 +138,15 @@ def print_report(history_df: pd.DataFrame, metrics: dict, config: Config):
         print(f" 재무 시차       : {config.fundamental_lag_months}개월 lag")
     print("-" * 70)
 
-    cols = ["Date", "Portfolio_Value", "Stock_Count", "kospi_close",
-            "Strategy_Return(%)", "KOSPI_Return(%)", "Alpha(%)"]
+    cols = [
+        "Date",
+        "Portfolio_Value",
+        "Stock_Count",
+        "kospi_close",
+        "Strategy_Return(%)",
+        "KOSPI_Return(%)",
+        "Alpha(%)",
+    ]
     avail = [c for c in cols if c in history_df.columns]
     print(history_df[avail].tail(12).to_string(index=False))
     print("=" * 70)
