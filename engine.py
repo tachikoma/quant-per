@@ -470,26 +470,37 @@ def run_backtest(market_data, config: Config, cache_dir=None):
                         )
                         universe = pd.concat([universe, metrics_df], axis=1)
 
-                        # 품질 필터 (하드 스크린): 결측치는 필터를 통과시키되 스코어에서 불리
+                        # 품질 필터 (하드 스크린)
+                        # ROIC/D-E/FCF-Yield는 필수 조건. 이자보상/EV-EBITDA는
+                        # 데이터가 있을 때만 적용 (무부채·이자없는 기업 불이익 방지).
                         roic_ok = universe["roic"].notna() & (
                             universe["roic"] >= config.min_roic
                         )
                         de_ok = universe["debt_to_equity"].notna() & (
                             universe["debt_to_equity"] <= config.max_debt_equity
                         )
-                        ic_ok = universe["interest_coverage"].notna() & (
-                            universe["interest_coverage"]
-                            >= config.min_interest_coverage
-                        )
                         fy_ok = universe["fcf_yield"].notna() & (
                             universe["fcf_yield"] >= config.min_fcf_yield
                         )
-                        q = roic_ok & de_ok & ic_ok & fy_ok
+                        q = roic_ok & de_ok & fy_ok
+
+                        # 이자보상배율: 데이터가 있는 종목만 하드 필터 적용
+                        if config.min_interest_coverage > 0:
+                            ic_data = universe["interest_coverage"].notna()
+                            ic_ok = ~ic_data | (
+                                universe["interest_coverage"]
+                                >= config.min_interest_coverage
+                            )
+                            q &= ic_ok
+
+                        # EV/EBITDA: 데이터가 있는 종목만 하드 필터 적용
                         if config.max_ev_ebitda > 0:
-                            ev_ok = universe["ev_ebitda"].notna() & (
+                            ev_data = universe["ev_ebitda"].notna()
+                            ev_ok = ~ev_data | (
                                 universe["ev_ebitda"] <= config.max_ev_ebitda
                             )
                             q &= ev_ok
+
                         universe = universe[q].copy()
 
                         if not universe.empty:

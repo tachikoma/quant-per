@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
 from tqdm import tqdm
 
 from config import Config
@@ -20,6 +21,10 @@ from config import Config
 DEFAULT_CACHE_DIR = Path(".cache") / "backtest"
 
 DART_BASE = "https://opendart.fss.or.kr/api"
+
+# 네트워크 불안정 대비 재시도 (DNS 실패/타임아웃 등 일시적 오류)
+_RETRY_TOTAL = 5
+_RETRY_BACKOFF = [2, 5, 10, 20, 40]
 
 # ── 공시 보고서 코드 ──
 RPT_ANNUAL = "11011"  # 사업보고서 (연간)
@@ -48,28 +53,62 @@ def _get_api_key() -> str:
     return key
 
 
+_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    """DNS 캐시 불안정 대비 재시도가 포함된 공유 세션."""
+    global _session
+    if _session is None:
+        s = requests.Session()
+        adapter = HTTPAdapter(
+            max_retries=_RETRY_TOTAL,
+            pool_connections=10,
+            pool_maxsize=10,
+        )
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
+        _session = s
+    return _session
+
+
 def _dart_get(endpoint: str, params: dict) -> dict:
+    """DART API 호출. 네트워크 불안정(DNS/타임아웃) 시 재시도."""
     key = _get_api_key()
-    resp = requests.get(
-        f"{DART_BASE}/{endpoint}",
-        params={"crtfc_key": key, **params},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("status") not in ("000", None):
-        # 013 (데이터 없음)은 정상적인 빈 결과로 처리
-        if data.get("status") == "013":
-            return {"list": []}
-        raise DartDataError(f"DART API 오류 ({endpoint}): {data.get('message')}")
-    return data
+    url = f"{DART_BASE}/{endpoint}"
+    full_params = {"crtfc_key": key, **params}
+    last_err = None
+    for attempt in range(_RETRY_TOTAL + 1):
+        try:
+            resp = _get_session().get(url, params=full_params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") not in ("000", None):
+                # 013 (데이터 없음)은 정상적인 빈 결과로 처리
+                if data.get("status") == "013":
+                    return {"list": []}
+                raise DartDataError(
+                    f"DART API 오류 ({endpoint}): {data.get('message')}"
+                )
+            return data
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.HTTPError,
+        ) as e:
+            last_err = e
+            if attempt < _RETRY_TOTAL:
+                wait = _RETRY_BACKOFF[min(attempt, len(_RETRY_BACKOFF) - 1)]
+                time.sleep(wait)
+                continue
+    raise DartDataError(f"DART 네트워크 오류 ({endpoint}): {last_err}")
 
 
 # ══════════════════════════════════════════════════════════════════
 # 1. corp_code ↔ ticker 매핑
 # ══════════════════════════════════════════════════════════════════
 def _fetch_corp_codes_raw(api_key: str) -> pd.DataFrame:
-    resp = requests.get(
+    resp = _get_session().get(
         f"{DART_BASE}/corpCode.xml", params={"crtfc_key": api_key}, timeout=60
     )
     resp.raise_for_status()
@@ -225,7 +264,14 @@ ACCOUNT_KEYS = {
             "기계장치의취득",
             "유형자산취득액",
         ],
-        "interest_paid": ["이자의 지급", "이자비용의 지급", "이자지급"],
+        "interest_paid": [
+            "이자의 지급",
+            "이자비용의 지급",
+            "이자지급",
+            "이자지급(영업)",
+            "이자비용",
+            "금융원가",
+        ],
     },
 }
 
@@ -270,12 +316,18 @@ def fetch_annual_financials(
     if cached_rows:
         return cached_rows
 
-    df = _fetch_financials(corp_code, str(year), RPT_ANNUAL, fs_div)
+    try:
+        df = _fetch_financials(corp_code, str(year), RPT_ANNUAL, fs_div)
+    except DartDataError:
+        df = pd.DataFrame()
     accounts = _extract_accounts(df)
 
-    # 연결(CFS) 실패 시 개별(OFS)로 폴백
+    # 연결(CFS) 실패(빈 응답 또는 네트워크 오류) 시 개별(OFS)로 폴백
     if not accounts:
-        df = _fetch_financials(corp_code, str(year), RPT_ANNUAL, "OFS")
+        try:
+            df = _fetch_financials(corp_code, str(year), RPT_ANNUAL, "OFS")
+        except DartDataError:
+            df = pd.DataFrame()
         accounts = _extract_accounts(df)
 
     result = _extract_financial_row(accounts) if accounts else {}
@@ -404,25 +456,32 @@ def merge_dart_financials(market_data: pd.DataFrame, cache_dir=None) -> pd.DataF
     ]
     fin_cols = [c for c in fin_cols if c in fin.columns]
 
-    left = pd.DataFrame(market_data[["date", "code"]])
-    left["date_ts"] = pd.to_datetime(left["date"])
-    left = left.sort_values("date_ts")
+    # merge_asof는 by와 함께 쓸 때 on key의 전역 정렬을 요구하므로,
+    # code 그룹별로 직접 처리한다 (그룹 내 정렬만 필요).
+    out = market_data.copy().reset_index(drop=True)
+    for c in fin_cols:
+        out[c] = pd.NA
 
     right = pd.DataFrame(fin[["ticker", "available_from"] + fin_cols])
     right = right.rename(columns={"available_from": "date_ts", "ticker": "code"})
-    right = right.sort_values("date_ts")
+    right = right.drop_duplicates(subset=["code", "date_ts"], keep="last")
+    right["date_ts"] = pd.to_datetime(right["date_ts"])
 
-    merged = pd.merge_asof(
-        left,
-        right,
-        on="date_ts",
-        by="code",
-        direction="backward",
-        allow_exact_matches=True,
-    )
+    for code, grp in right.groupby("code"):
+        grp = grp.sort_values("date_ts")
+        mask = out["code"] == code
+        dates = out.loc[mask, "date"].values
+        ts = pd.to_datetime(dates)
+        # available_from <= date 인 마지막 행의 인덱스 (매칭 없으면 -1)
+        import numpy as np
 
-    out = market_data.copy().reset_index(drop=True)
-    fin_map = pd.DataFrame(merged[fin_cols])
-    for c in fin_cols:
-        out[c] = fin_map[c].reset_index(drop=True)
+        idx_arr = np.atleast_1d(grp["date_ts"].searchsorted(ts, side="right") - 1)
+        for c in fin_cols:
+            vals = grp[c].to_numpy(dtype="object")
+            filled = out.loc[mask, c]
+            matched = pd.Series(
+                [vals[int(i)] if int(i) >= 0 else pd.NA for i in idx_arr],
+                index=filled.index,
+            )
+            out.loc[mask, c] = matched
     return out

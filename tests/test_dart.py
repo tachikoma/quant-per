@@ -233,3 +233,54 @@ class TestMergeDartFinancials:
         out = merge_dart_financials(market, cache_dir=cache_dir)
         assert "operating_income" in out.columns
         assert out["operating_income"].isna().all()
+
+    def test_multi_stock_alignment(self, tmp_path):
+        """여러 종목이 섞여 있어도 각 행에 올바른 재무제표가 매칭되어야 한다.
+
+        (merge_asof 전역정렬 이슈 회귀 테스트)
+        """
+        cache_dir = tmp_path / ".cache" / "backtest"
+        dart_dir = cache_dir / "dart_data"
+        dart_dir.mkdir(parents=True, exist_ok=True)
+
+        # 종목 A (005930): 2022년 OI 100M, 종목 B (000660): 2022년 OI 300M
+        fin_a = pd.DataFrame(
+            [
+                {
+                    "year": 2022,
+                    "operating_income": 100_000_000,
+                    "total_equity": 300_000_000,
+                }
+            ]
+        )
+        fin_a.to_parquet(dart_dir / "00126380.parquet", index=False)
+        fin_b = pd.DataFrame(
+            [
+                {
+                    "year": 2022,
+                    "operating_income": 300_000_000,
+                    "total_equity": 900_000_000,
+                }
+            ]
+        )
+        fin_b.to_parquet(dart_dir / "99999999.parquet", index=False)
+
+        codes = pd.DataFrame(
+            [
+                {"corp_code": "00126380", "ticker": "005930", "corp_name": "종목A"},
+                {"corp_code": "99999999", "ticker": "000660", "corp_name": "종목B"},
+            ]
+        )
+        codes.to_parquet(cache_dir / "dart_corp_codes.parquet", index=False)
+
+        # 인위적으로 섞인 순서 (코드 정렬상 B가 먼저 오도록)
+        market = pd.DataFrame(
+            [
+                {"date": pd.Timestamp("2024-03-01"), "code": "005930", "close": 1},
+                {"date": pd.Timestamp("2024-03-01"), "code": "000660", "close": 1},
+            ]
+        )
+        out = merge_dart_financials(market, cache_dir=cache_dir)
+        # 원본 행 순서 보존 + 종목별 정확한 값
+        assert out.loc[0, "operating_income"] == pytest.approx(100_000_000)
+        assert out.loc[1, "operating_income"] == pytest.approx(300_000_000)
