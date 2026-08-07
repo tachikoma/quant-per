@@ -47,9 +47,11 @@ backtest.py → Config.from_env() → fetch_rebalancing_data() → run_backtest(
 - `metrics.py`: 재무 지표 계산 (ROIC, FCF, FCF Yield, EV/EBITDA, NCAV, D/E, 이자보상, ROE, 이익안정성)
 - `collect_dart_data.py`: 배치 수집, 일 20,000건 / 분당 1,000회 한도 자동 준수 (일 19,500건 후 KST 자정 대기)
 - **공시일 look-ahead bias 방지**: 사업보고서(12월 결산)는 다음해 4/15부터 사용 (`available_from()`)
-- 카스넬슨 품질 필터: ROIC≥MIN_ROIC, D/E≤MAX_DEBT_EQUITY, 이자보상≥MIN_INTEREST_COVERAGE, (EV/EBITDA≤MAX_EV_EBITDA)
-- 카스넬슨 스코어: `rank(EV/EBITDA↓) + rank(PER↓) + rank(FCF Yield↓) + rank(NCAV↓)`
+- 카스넬슨 품질 필터: ROIC≥MIN_ROIC, D/E≤MAX_DEBT_EQUITY, FCF Yield≥MIN, (이자보상≥MIN, EV/EBITDA≤MAX — 데이터 있을 때만)
+- 카스넬슨 스코어 (Q-G-V 3요소): `rank(EV/EBITDA↓) + rank(PER↓) + rank(FCF Yield↑)` + 선택적으로 `rank(3Y CAGR↑)` (기본 off)
+- **NCAV는 기본 off** (Graham net-net, 카스넬슨 프레임워크와 불일치, 백테스트서 성과 저해)
 - 재무제표가 없는 종목은 품질 필터에서 탈락 (DART 미수집 종목 = 자동 제외)
+- merge_dart_financials: code 그룹별 searchsorted로 look-ahead bias 없는 매칭 (merge_asof 전역정렬 버그 주의)
 
 ## 설정 (.env)
 
@@ -60,7 +62,8 @@ backtest.py → Config.from_env() → fetch_rebalancing_data() → run_backtest(
 - `PER_PCTILE`/`PBR_PCTILE`/`ROE_PCTILE`은 `use_multi_factor=True`일 때만 적용
   - `use_multi_factor=True`: PBR 하위 n% 필터 + PER/ROE/배당 스코어링
   - `use_multi_factor=False`: fundmental 필터 없음 (모멘텀 전용)
-- 카스넬슨 파라미터: `USE_KATSENELSON`, `MIN_ROIC`, `MAX_DEBT_EQUITY`, `MIN_INTEREST_COVERAGE`, `MAX_EV_EBITDA`
+- 카스넬슨 파라미터: `USE_KATSENELSON`, `MIN_ROIC`, `MAX_DEBT_EQUITY`, `MIN_INTEREST_COVERAGE`, `MAX_EV_EBITDA`, `KATSENELSON_USE_GROWTH`, `KATSENELSON_USE_NCAV`
+- 카스넬슨 실전 결과(2016~2026): NCAV/성장 off 기본. K3(저변동성 결합) MDD -25%로 가장 견고
 
 ## 테스트
 

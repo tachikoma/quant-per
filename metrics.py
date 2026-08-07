@@ -137,6 +137,28 @@ def calc_roe(net_income, total_equity) -> float | None:
     return safe_div(net_income, total_equity)
 
 
+def calc_cagr_3y(current, past_3y) -> float | None:
+    """3년 연평균 성장률(CAGR).
+
+    현재값과 3년 전 값을 비교해 연환산 성장률 계산.
+    - 과거값 0 이하 또는 현재값 0 이하이면 None (성장률 무의미)
+    - 현재/과거가 0에 근접하면 None
+    """
+    if _is_bad(current) or _is_bad(past_3y):
+        return None
+    try:
+        c = float(current)
+        p = float(past_3y)
+    except (TypeError, ValueError):
+        return None
+    if c <= 0 or p <= 0:
+        return None
+    ratio = c / p
+    if ratio <= 0:
+        return None
+    return ratio ** (1 / 3) - 1
+
+
 def build_financial_metrics(
     fin_row: dict, market_cap: float, tax_rate: float = 0.25
 ) -> dict:
@@ -153,6 +175,13 @@ def build_financial_metrics(
     ni = fin_row.get("net_income")
     ip = fin_row.get("interest_paid")
 
+    # 성장 지표 (3년 CAGR)
+    rev_cagr = calc_cagr_3y(fin_row.get("revenue"), fin_row.get("revenue_3y_ago"))
+    oi_cagr = calc_cagr_3y(
+        fin_row.get("operating_income"), fin_row.get("operating_income_3y_ago")
+    )
+    ni_cagr = calc_cagr_3y(fin_row.get("net_income"), fin_row.get("net_income_3y_ago"))
+
     return {
         "roe": calc_roe(ni, te),
         "roic": calc_roic(oi, tl, te, cash, tax_rate),
@@ -163,4 +192,7 @@ def build_financial_metrics(
         "ev_ebitda": calc_ev_ebitda(market_cap, b, cash, oi, dep),
         "ncav": calc_ncav(ca, tl),
         "ncav_ratio": safe_div(calc_ncav(ca, tl), market_cap),
+        "revenue_cagr_3y": rev_cagr,
+        "oi_cagr_3y": oi_cagr,
+        "ni_cagr_3y": ni_cagr,
     }

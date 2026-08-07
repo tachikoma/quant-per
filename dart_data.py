@@ -461,8 +461,15 @@ def merge_dart_financials(market_data: pd.DataFrame, cache_dir=None) -> pd.DataF
     out = market_data.copy().reset_index(drop=True)
     for c in fin_cols:
         out[c] = pd.NA
+    out["fin_year"] = pd.NA
 
-    right = pd.DataFrame(fin[["ticker", "available_from"] + fin_cols])
+    # 성장률 계산용 과거 연도 값 (매칭 연도 대비 N년 전)
+    growth_lookback = 3
+    for gc in ["revenue", "operating_income", "net_income"]:
+        if gc in fin_cols:
+            out[f"{gc}_{growth_lookback}y_ago"] = pd.NA
+
+    right = pd.DataFrame(fin[["ticker", "available_from", "year"] + fin_cols])
     right = right.rename(columns={"available_from": "date_ts", "ticker": "code"})
     right = right.drop_duplicates(subset=["code", "date_ts"], keep="last")
     right["date_ts"] = pd.to_datetime(right["date_ts"])
@@ -476,6 +483,13 @@ def merge_dart_financials(market_data: pd.DataFrame, cache_dir=None) -> pd.DataF
         import numpy as np
 
         idx_arr = np.atleast_1d(grp["date_ts"].searchsorted(ts, side="right") - 1)
+        years = grp["year"].to_numpy(dtype="object")
+        year_to_row = {}
+        for gi in range(len(grp)):
+            y = years[gi]
+            if y is not None and not pd.isna(y):
+                year_to_row[int(y)] = gi
+
         for c in fin_cols:
             vals = grp[c].to_numpy(dtype="object")
             filled = out.loc[mask, c]
@@ -484,4 +498,22 @@ def merge_dart_financials(market_data: pd.DataFrame, cache_dir=None) -> pd.DataF
                 index=filled.index,
             )
             out.loc[mask, c] = matched
+
+        # 매칭된 연도와 N년 전 값을 기록
+        sel_idx = out.index[mask]
+        for gi, i in enumerate(idx_arr):
+            ii = int(i)
+            if ii < 0:
+                continue
+            row_idx = sel_idx[gi]
+            out.loc[row_idx, "fin_year"] = years[ii]
+            y0 = int(years[ii])
+            for gc in ["revenue", "operating_income", "net_income"]:
+                col = f"{gc}_{growth_lookback}y_ago"
+                if col not in out.columns:
+                    continue
+                y_prev = y0 - growth_lookback
+                ri = year_to_row.get(y_prev, -1)
+                if ri >= 0:
+                    out.loc[row_idx, col] = grp[gc].iloc[ri]
     return out

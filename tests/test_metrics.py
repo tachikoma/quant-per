@@ -11,8 +11,27 @@ from metrics import (
     calc_debt_to_equity,
     calc_earnings_stability,
     calc_roe,
+    calc_cagr_3y,
     build_financial_metrics,
 )
+
+
+class TestCagr3y:
+    def test_normal(self):
+        # 100 → 133.1 (3년, 10% CAGR)
+        assert calc_cagr_3y(133.1, 100) == pytest.approx(0.10, rel=0.02)
+
+    def test_zero_past(self):
+        assert calc_cagr_3y(100, 0) is None
+
+    def test_negative(self):
+        assert calc_cagr_3y(-100, 100) is None
+        assert calc_cagr_3y(100, -100) is None
+
+    def test_none(self):
+        assert calc_cagr_3y(None, 100) is None
+        assert calc_cagr_3y(100, None) is None
+        assert calc_cagr_3y(float("nan"), 100) is None
 
 
 class TestNetDebt:
@@ -126,8 +145,11 @@ class TestBuildMetrics:
             "total_equity": 600,
             "borrowings": 100,
             "revenue": 1000,
+            "revenue_3y_ago": 800,
             "operating_income": 200,
+            "operating_income_3y_ago": 150,
             "net_income": 120,
+            "net_income_3y_ago": 90,
             "interest_paid": 10,
             "depreciation": 50,
             "operating_cf": 300,
@@ -138,6 +160,9 @@ class TestBuildMetrics:
         assert m["roe"] == pytest.approx(0.2)
         assert m["fcf"] == pytest.approx(220)
         assert m["fcf_yield"] == pytest.approx(0.11)
+        # (1000/800)^(1/3)-1 ≈ 7.7%
+        assert m["revenue_cagr_3y"] == pytest.approx((1000 / 800) ** (1 / 3) - 1)
+        assert m["oi_cagr_3y"] == pytest.approx((200 / 150) ** (1 / 3) - 1)
         assert m["ncav"] == pytest.approx(100)
         assert m["debt_to_equity"] == pytest.approx(100 / 600)
         assert m["interest_coverage"] == pytest.approx(20.0)

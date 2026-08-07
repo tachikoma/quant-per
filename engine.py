@@ -448,6 +448,10 @@ def run_backtest(market_data, config: Config, cache_dir=None):
                         "current_assets",
                         "net_income",
                         "depreciation",
+                        "revenue",
+                        "revenue_3y_ago",
+                        "operating_income_3y_ago",
+                        "net_income_3y_ago",
                     ]
                     for col in fin_cols:
                         if col not in universe.columns:
@@ -504,7 +508,23 @@ def run_backtest(market_data, config: Config, cache_dir=None):
                         universe = universe[q].copy()
 
                         if not universe.empty:
-                            # 가치 스코어링: 낮을수록 좋은 지표들 순위 합산
+                            # ── 가치 + 성장 스코어링 (Q-G-V 3요소) ──
+                            score_components = []
+
+                            # Q (질) 은 이미 하드 필터로 처리됨.
+                            # G (성장): 3년 매출/영업이익 CAGR 순위 (높을수록 좋음)
+                            if config.katsenelson_use_growth:
+                                universe["rank_revenue_cagr"] = universe[
+                                    "revenue_cagr_3y"
+                                ].rank(ascending=False, pct=True)
+                                universe["rank_oi_cagr"] = universe["oi_cagr_3y"].rank(
+                                    ascending=False, pct=True
+                                )
+                                score_components.extend(
+                                    ["rank_revenue_cagr", "rank_oi_cagr"]
+                                )
+
+                            # V (가격): 낮을수록 좋은 지표들 순위
                             universe["rank_ev_ebitda"] = universe["ev_ebitda"].rank(
                                 pct=True
                             )
@@ -512,17 +532,20 @@ def run_backtest(market_data, config: Config, cache_dir=None):
                             universe["rank_fcf_yield"] = universe["fcf_yield"].rank(
                                 ascending=False, pct=True
                             )
-                            universe["rank_ncav"] = universe["ncav_ratio"].rank(
-                                ascending=False, pct=True
-                            )
                             score_components.extend(
                                 [
                                     "rank_ev_ebitda",
                                     "rank_per",
                                     "rank_fcf_yield",
-                                    "rank_ncav",
                                 ]
                             )
+
+                            # NCAV는 그레이엄 net-net 보조 팩터 (선택)
+                            if config.katsenelson_use_ncav:
+                                universe["rank_ncav"] = universe["ncav_ratio"].rank(
+                                    ascending=False, pct=True
+                                )
+                                score_components.append("rank_ncav")
 
                             # 모멘텀/저변동성이 켜져 있으면 보조 팩터로 추가
                             if config.use_momentum and "momentum" in universe.columns:

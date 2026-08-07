@@ -162,6 +162,8 @@ class Config:
     min_interest_coverage: float = 2.0
     max_ev_ebitda: float = 20.0
     earnings_stability_years: int = 5
+    katsenelson_use_growth: bool = False
+    katsenelson_use_ncav: bool = False
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -195,4 +197,8 @@ class Config:
             min_interest_coverage=float(os.getenv("MIN_INTEREST_COVERAGE", "2.0")),
             max_ev_ebitda=float(os.getenv("MAX_EV_EBITDA", "20.0")),
             earnings_stability_years=int(os.getenv("EARNINGS_STABILITY_YEARS", "5")),
+            katsenelson_use_growth=os.getenv("KATSENELSON_USE_GROWTH", "false").lower()
+            == "true",
+            katsenelson_use_ncav=os.getenv("KATSENELSON_USE_NCAV", "false").lower()
+            == "true",
         )

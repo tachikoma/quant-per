@@ -7,7 +7,7 @@ pykrx 기반 KRX 실거래 데이터 + DART 재무제표로 가치투자/모멘�
 |------|------|---------|:----:|
 | PBR+멀티팩터 | PBR 하위 30% + PBR≥0 | PER + ROE + 배당 순위 합산 | ⚠️ |
 | 모멘텀+저변동성 | 시총/거래대금 | 12개월 모멘텀 + 변동성 | ✅ 없음 |
-| 카스넬슨 가치투자 | ROIC, D/E, 이자보상, EV/EBITDA | FCF Yield + EV/EBITDA + PER + NCAV | ✅ 공시일 lag |
+| 카스넬슨 가치투자 | ROIC, D/E, 이자보상, EV/EBITDA | FCF Yield + EV/EBITDA + PER (+선택 3Y CAGR) | ✅ 공시일 lag |
 
 전략은 `.env`에서 블록 주석 전환으로 간편히 스위칭 가능합니다.
 
@@ -70,6 +70,8 @@ cp .env.sample .env
 | `MAX_DEBT_EQUITY` | 1.5 | 카스넬슨: 차입금/자본 비율 상한 |
 | `MIN_INTEREST_COVERAGE` | 2.0 | 카스넬슨: 이자보상배율 하한 |
 | `MAX_EV_EBITDA` | 20.0 | 카스넬슨: EV/EBITDA 상한 (0=미적용) |
+| `KATSENELSON_USE_GROWTH` | false | 카스넬슨: 3Y CAGR 성장 스코어 (데이터상 부정적) |
+| `KATSENELSON_USE_NCAV` | false | 카스넬슨: NCAV 스코어 (Graham net-net, 성과 저해) |
 | `FUNDAMENTAL_LAG_MONTHS` | 0 | 재무데이터 시차 보정 (실험용) |
 
 ## 실행
@@ -115,7 +117,7 @@ uv run python experiments.py       # 배치 실험
 | PBR+멀티팩터 | PBR 하위 30% + PBR≥0, 시총 200억~1조, 거래대금≥10억 | `rank(PER) + rank(ROE↓) + rank(DIV↓)` |
 | 모멘텀 단독 | 시총/거래대금/우선주 제외만 | `rank(모멘텀↓)` |
 | 모멘텀+저변동성 | 시총/거래대금/우선주 제외만 | `rank(모멘텀↓) + rank(변동성)` |
-| 카스넬슨 가치투자 | ROIC≥MIN, D/E≤MAX, 이자보상≥MIN, (EV/EBITDA≤MAX) | `rank(EBITDA↓) + rank(PER↓) + rank(FCF Yield↓) + rank(NCAV↓)` |
+| 카스넬슨 가치투자 | ROIC≥MIN, D/E≤MAX, FCF Yield≥MIN, (이자보상≥MIN, EV/EBITDA≤MAX) | `rank(EBITDA↓) + rank(PER↓) + rank(FCF Yield↑)` + 선택 `rank(3Y CAGR↑)` |
 
 5. **KOSPI 벤치마크** (`report.py:benchmark_strategy`)
    - 동일 리밸런싱 기준일의 KOSPI 지수 대비 Alpha 계산
