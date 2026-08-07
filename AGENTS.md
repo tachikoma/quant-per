@@ -10,6 +10,7 @@ cp .env.sample .env          # 설정 생성 후 KRX_ID/PW/DART_API_KEY 입력
 uv run python backtest.py    # 백테스트 실행
 uv run python collect_dart_data.py  # DART 재무제표 수집 (카스넬슨 전용)
 uv run python experiments.py # 배치 실험 실행
+uv run python compare_strategies.py  # 전략별 성과 비교 (캐시 기반, pykrx 호출 없음)
 uv run pytest                # 전체 테스트
 uv run pytest tests/test_engine.py::TestBasicBacktest -v  # 특정 테스트
 uv run ruff check            # 린트

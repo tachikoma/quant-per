@@ -22,6 +22,7 @@ pykrx 기반 KRX 실거래 데이터 + DART 재무제표로 가치투자/모멘�
 ├── collect_dart_data.py # DART 재무제표 배치 수집 (일 20,000건 한도 준수)
 ├── report.py            # KOSPI 벤치마크 비교 + 결과 리포트 출력
 ├── experiments.py       # 배치 실험 (전략 비교)
+├── compare_strategies.py # 캐시 기반 전략 성과 비교 (pykrx 호출 없음)
 ├── pyproject.toml       # 프로젝트 메타데이터 및 의존성
 ├── .env                 # 전략 파라미터 (KRX_ID, DART_API_KEY 등)
 └── .env.sample          # .env 예시 (secret 제외)
@@ -80,6 +81,7 @@ cp .env.sample .env
 uv run python backtest.py          # 기본 백테스트
 uv run python collect_dart_data.py # DART 재무제표 수집 (카스넬슨 전용)
 uv run python experiments.py       # 배치 실험
+uv run python compare_strategies.py # 전략별 성과 비교 (캐시 데이터, pykrx 호출 없음)
 ```
 
 ## 엔진 동작 방식
@@ -148,10 +150,23 @@ uv run python experiments.py       # 배치 실험
 
 > ✅ 가격 데이터만 사용 — look-ahead bias 0. 항상 30종목 풀채움.
 
+### 전략 3: 카스넬슨 가치투자 (2016~2026, DART 재무제표)
+
+설정: Q-G-V 3요소 (질=하드필터, 가치=rank 스코어), NCAV/성장 off 기본
+
+| 지표 | K1 순수 | K3 +저변동성 |
+|------|---------|-------------|
+| CAGR | +0.29% | **+1.11%** |
+| MDD | -30.7% | **-25.1%** |
+
+> ⚠️ NCAV는 Graham net-net 지표로 카스넬슨과 불일치 + 성과 저해 → 기본 off.
+> ⚠️ 3Y 과거 CAGR 성장 팩터도 한국 데이터서 부정적 → 기본 off.
+> 저변동성 결합(K3)이 MDD -25%로 가장 견고.
+
 ### 권장 자본별 전략
 
 | 자본 | 추천 전략 | 비고 |
 |:----:|:---------:|------|
 | 1,000만원↑ | 모멘텀+저변동성 | bias-free, 30종목 분산 가능 |
 | 소액 | PBR+멀티팩터 | 저가주 위주 |
-| 장기 투자 | 카스넬슨 가치투자 | DART 재무제표 기반 품질+가치 |
+| 리스크 방어 | 카스넬슨+저변동성 | DART 재무제표 기반, MDD -25%로 가장 견고 |
