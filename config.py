@@ -153,6 +153,9 @@ class Config:
     use_momentum: bool = False
     momentum_window: int = 12
     use_low_volatility: bool = False
+    exclude_negative_per: bool = False
+    use_market_regime: bool = True
+    ma_window: int = 200
     kospi_ticker: str = "1001"
     dart_api_key: str = ""
     use_katsenelson: bool = False
@@ -189,6 +192,10 @@ class Config:
             use_low_volatility=os.getenv("USE_LOW_VOLATILITY", "false").lower()
             == "true",
             fundamental_lag_months=int(os.getenv("FUNDAMENTAL_LAG_MONTHS", "0")),
+            exclude_negative_per=os.getenv("EXCLUDE_NEGATIVE_PER", "false").lower()
+            == "true",
+            use_market_regime=os.getenv("USE_MARKET_REGIME", "true").lower() == "true",
+            ma_window=int(os.getenv("MA_WINDOW", "200")),
             dart_api_key=os.getenv("DART_API_KEY", ""),
             use_katsenelson=os.getenv("USE_KATSENELSON", "false").lower() == "true",
             min_roic=float(os.getenv("MIN_ROIC", "0.10")),

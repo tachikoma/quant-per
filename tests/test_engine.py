@@ -456,3 +456,187 @@ class TestKatsenelson:
         )
         history, _ = run_backtest(market_data, config, cache_dir=cache_dir)
         assert history["Stock_Count"].iloc[1] == 0
+
+    def test_invalid_rebalance_freq_raises(self, zero_cost_config):
+        """지원하지 않는 리밸런싱 주기는 명시적 오류."""
+        import pytest
+
+        fd_jan, ld_jan = _make_month_dates(2020, 1)
+        rows = _make_stock_rows([fd_jan, ld_jan], ["000010"], 10000)
+        market_data = pd.DataFrame(rows)
+        bad = Config(
+            start_date="2020-01-01",
+            end_date="2020-01-31",
+            initial_capital=100_000_000,
+            buy_cost=0.0,
+            sell_cost=0.0,
+            slippage=0.0,
+            n_stocks=30,
+            min_market_cap=50_000_000_000,
+            min_trading_val=1_000_000_000,
+            use_multi_factor=False,
+            rebalance_freq="weekly",
+        )
+        with pytest.raises(ValueError):
+            run_backtest(market_data, bad)
+
+    def test_exclude_negative_per_filters_loss_makers(self):
+        """음수 PER 종목은 '저PER'로 오스코어되지 않아야 한다."""
+        fd_jan, ld_jan = _make_month_dates(2020, 1)
+        rows = []
+        # A: 음수 PER (적자 기업), B: 정상 저PER
+        rows += _make_stock_rows([fd_jan, ld_jan], ["000010"], 10000, per=-5.0)
+        rows += _make_stock_rows([fd_jan, ld_jan], ["000020"], 10000, per=5.0)
+        market_data = pd.DataFrame(rows)
+
+        config = Config(
+            start_date="2020-01-01",
+            end_date="2020-01-31",
+            initial_capital=100_000_000,
+            buy_cost=0.0,
+            sell_cost=0.0,
+            slippage=0.0,
+            n_stocks=1,
+            min_market_cap=10_000_000_000,
+            min_trading_val=1_000_000_000,
+            use_multi_factor=False,
+            exclude_negative_per=True,
+        )
+        history, _ = run_backtest(market_data, config)
+        # n_stocks=1, 저PER=5가 정상 000020이 선택되어야 함
+        assert history["Stock_Count"].iloc[1] == 1
+
+    def test_market_regime_nan_does_not_liquidate(self, tmp_path):
+        """KOSPI close가 NaN이면 전량 현금화하지 않고 유지 (bull 기본)."""
+        cache_dir = tmp_path / ".cache" / "backtest"
+        (cache_dir).mkdir(parents=True, exist_ok=True)
+        # KOSPI MA 캐시에 NaN close만 있는 경우
+        kospi = pd.DataFrame(
+            {"kospi_close": [float("nan")]},
+            index=pd.to_datetime(["2020-01-01"]),
+        )
+        kospi.index.name = "date"
+        kospi.to_parquet(cache_dir / "kospi_ma.parquet")
+
+        fd_jan, ld_jan = _make_month_dates(2020, 1)
+        rows = _make_stock_rows([fd_jan, ld_jan], ["000010"], 10000)
+        market_data = pd.DataFrame(rows)
+
+        config = Config(
+            start_date="2020-01-01",
+            end_date="2020-01-31",
+            initial_capital=100_000_000,
+            buy_cost=0.0,
+            sell_cost=0.0,
+            slippage=0.0,
+            n_stocks=1,
+            min_market_cap=10_000_000_000,
+            min_trading_val=1_000_000_000,
+            use_multi_factor=False,
+        )
+        history, _ = run_backtest(market_data, config, cache_dir=cache_dir)
+        # NaN close → is_bull 유지 → 매수 수행 → 종목 1개 보유
+        assert history["Stock_Count"].iloc[1] == 1
+
+    def test_market_regime_off_never_liquidates(self, tmp_path):
+        """use_market_regime=False면 KOSPI가 하락세여도 청산하지 않는다."""
+        cache_dir = tmp_path / ".cache" / "backtest"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        # KOSPI가 MA200 아래 (하락세)인 캐시 — start(2020-01-01)의 420일 레프백 커버
+        close_vals = [100.0] * 800
+        kospi = pd.DataFrame(
+            {"kospi_close": close_vals},
+            index=pd.date_range("2018-01-02", periods=800, freq="B"),
+        )
+        kospi.index.name = "date"
+        kospi.to_parquet(cache_dir / "kospi_ma.parquet")
+
+        fd_jan, ld_jan = _make_month_dates(2020, 1)
+        rows = _make_stock_rows([fd_jan, ld_jan], ["000010"], 10000)
+        market_data = pd.DataFrame(rows)
+
+        config = Config(
+            start_date="2020-01-01",
+            end_date="2020-01-31",
+            initial_capital=100_000_000,
+            buy_cost=0.0,
+            sell_cost=0.0,
+            slippage=0.0,
+            n_stocks=1,
+            min_market_cap=10_000_000_000,
+            min_trading_val=1_000_000_000,
+            use_multi_factor=False,
+            use_market_regime=False,
+        )
+        history, _ = run_backtest(market_data, config, cache_dir=cache_dir)
+        # 레짐 off → is_bull 유지 → 매수 수행
+        assert history["Stock_Count"].iloc[1] == 1
+
+    def test_start_end_date_filter(self):
+        """start_date/end_date 밖의 데이터는 백테스트에서 제외돼야 한다."""
+        fd_jan, ld_jan = _make_month_dates(2020, 1)
+        fd_feb, ld_feb = _make_month_dates(2020, 2)
+        rows = _make_stock_rows([fd_jan, ld_jan, fd_feb, ld_feb], ["000010"], 10000)
+        market_data = pd.DataFrame(rows)
+
+        config = Config(
+            start_date="2020-01-01",
+            end_date="2020-01-31",
+            initial_capital=100_000_000,
+            buy_cost=0.0,
+            sell_cost=0.0,
+            slippage=0.0,
+            n_stocks=1,
+            min_market_cap=10_000_000_000,
+            min_trading_val=1_000_000_000,
+            use_multi_factor=False,
+            use_market_regime=False,
+        )
+        history, _ = run_backtest(market_data, config)
+        # 1월만 사용 → 마지막 기록이 1월 마지막 거래일
+        assert pd.Timestamp(history["Date"].iloc[-1]).month == 1
+
+    def test_end_date_excludes_future(self):
+        """end_date 이후 데이터가 있으면 제외돼야 한다 (기간 분리)."""
+        fd_jan, ld_jan = _make_month_dates(2020, 1)
+        fd_feb, ld_feb = _make_month_dates(2020, 2)
+        rows = _make_stock_rows([fd_jan, ld_jan, fd_feb, ld_feb], ["000010"], 10000)
+        market_data = pd.DataFrame(rows)
+
+        config = Config(
+            start_date="2020-01-01",
+            end_date="2020-01-31",
+            initial_capital=100_000_000,
+            buy_cost=0.0,
+            sell_cost=0.0,
+            slippage=0.0,
+            n_stocks=1,
+            min_market_cap=10_000_000_000,
+            min_trading_val=1_000_000_000,
+            use_multi_factor=False,
+            use_market_regime=False,
+        )
+        history, _ = run_backtest(market_data, config)
+        assert history["Date"].nunique() == 2  # 초기 + 1월 MTM만
+
+    def test_empty_period_raises(self):
+        """기간 내 데이터가 없으면 명시적 ValueError."""
+        fd_jan, ld_jan = _make_month_dates(2020, 1)
+        rows = _make_stock_rows([fd_jan, ld_jan], ["000010"], 10000)
+        market_data = pd.DataFrame(rows)
+
+        config = Config(
+            start_date="2030-01-01",
+            end_date="2030-01-31",
+            initial_capital=100_000_000,
+            buy_cost=0.0,
+            sell_cost=0.0,
+            slippage=0.0,
+            n_stocks=1,
+            min_market_cap=10_000_000_000,
+            min_trading_val=1_000_000_000,
+            use_multi_factor=False,
+            use_market_regime=False,
+        )
+        with pytest.raises(ValueError):
+            run_backtest(market_data, config)

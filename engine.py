@@ -228,12 +228,30 @@ def _fetch_kospi_for_ma(config: Config, cache_dir=None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def run_backtest(market_data, config: Config, cache_dir=None):
+def run_backtest(market_data, config: Config, cache_dir=None, track_stats=None):
+    if config.rebalance_freq not in ("monthly", "quarterly"):
+        raise ValueError(
+            f"지원하지 않는 리밸런싱 주기: '{config.rebalance_freq}' "
+            "(monthly / quarterly 만 지원)"
+        )
+    if track_stats is not None:
+        track_stats.setdefault("buy_ratios", [])
+        track_stats.setdefault("sell_ratios", [])
     initial_capital = config.initial_capital
     buy_cost, sell_cost, slippage = config.buy_cost, config.sell_cost, config.slippage
     n_stocks = config.n_stocks
 
     market_data = market_data.copy()
+    start_ts = pd.Timestamp(config.start_date)
+    end_ts = pd.Timestamp(config.end_date)
+    market_data["date"] = pd.to_datetime(market_data["date"])
+    market_data = market_data[
+        (market_data["date"] >= start_ts) & (market_data["date"] <= end_ts)
+    ]
+    if market_data.empty:
+        raise ValueError(
+            f"기간 {config.start_date}~{config.end_date}에 market_data 없음"
+        )
     if config.use_katsenelson:
         market_data = merge_dart_financials(market_data, cache_dir=cache_dir)
     market_data["year_month"] = market_data["date"].dt.to_period("M")
@@ -252,13 +270,16 @@ def run_backtest(market_data, config: Config, cache_dir=None):
     kospi_regime = _fetch_kospi_for_ma(config, cache_dir)
     if not kospi_regime.empty:
         kospi_regime["ma200"] = (
-            kospi_regime["kospi_close"].rolling(200, min_periods=200).mean()
+            kospi_regime["kospi_close"]
+            .rolling(config.ma_window, min_periods=config.ma_window)
+            .mean()
         )
 
     cash = initial_capital
     current_portfolio = []
     history = []
     total_cost_spent = 0
+    _katsenelson_empty_warned = [False]
     first_first_day = None
 
     first_backtest_month = None
@@ -292,10 +313,14 @@ def run_backtest(market_data, config: Config, cache_dir=None):
 
         # ── Market regime: KOSPI 200-day MA ──
         is_bull = True
-        if not kospi_regime.empty:
+        if config.use_market_regime and not kospi_regime.empty:
             first_ts = pd.Timestamp(first_day)
             closest = kospi_regime[kospi_regime.index <= first_ts].tail(1)
-            if not closest.empty and closest["ma200"].notna().iloc[0]:
+            if (
+                not closest.empty
+                and closest["ma200"].notna().iloc[0]
+                and closest["kospi_close"].notna().iloc[0]
+            ):
                 is_bull = closest["kospi_close"].iloc[0] >= closest["ma200"].iloc[0]
 
         # ── Bear market → liquidate ──
@@ -315,6 +340,8 @@ def run_backtest(market_data, config: Config, cache_dir=None):
                         if trade_val > 0
                         else slippage
                     )
+                    if track_stats is not None and trade_val > 0:
+                        track_stats["sell_ratios"].append(gross_sell_value / trade_val)
                 gross_sell_value = asset["shares"] * exec_sell_price
                 net_sell_val = gross_sell_value * (1 - eff_slippage) * (1 - sell_cost)
                 month_cost += gross_sell_value - net_sell_val
@@ -338,7 +365,13 @@ def run_backtest(market_data, config: Config, cache_dir=None):
                 if config.fundamental_lag_months > 0:
                     lag_period = current_month - config.fundamental_lag_months
                     lagged_df = market_data[market_data["year_month"] == lag_period]
-                    if not lagged_df.empty:
+                    if lagged_df.empty:
+                        print(
+                            f"  ⚠️ [lag] {current_month}: lag {config.fundamental_lag_months}개월 전 데이터 "
+                            "없음 → 이번 리밸런싱 스킵 (당월 데이터로 폴백하지 않음)"
+                        )
+                        is_rebalance = False
+                    else:
                         lag_dates = sorted(lagged_df["date"].unique())
                         lag_fund = lagged_df[lagged_df["date"] == lag_dates[0]][
                             ["code", "per", "pbr", "div", "bps", "eps"]
@@ -369,325 +402,357 @@ def run_backtest(market_data, config: Config, cache_dir=None):
                             ]
                         )
 
-                # Select target portfolio using first_day data
-                universe = first_day_df[
-                    (~first_day_df["is_preferred"])
-                    & (first_day_df["market_cap"] >= config.min_market_cap)
-                    & (first_day_df["trading_val"] >= config.min_trading_val)
-                ].copy()
-
-                if config.max_market_cap > 0:
-                    universe = universe[universe["market_cap"] <= config.max_market_cap]
-
-                # ── Percentile-based fundamental filters (intersection) ──
-                if config.use_multi_factor:
-                    for col in ["pbr", "div", "bps", "eps"]:
-                        if col not in universe.columns:
-                            universe[col] = float("nan")
-                    universe["roe"] = universe["eps"] / universe["bps"]
-                    pbr_r = universe["pbr"].rank(pct=True)
-                    universe = universe[
-                        (pbr_r <= config.pbr_pctile) & (universe["pbr"] >= 0)
+                if is_rebalance:
+                    # Select target portfolio using first_day data
+                    universe = first_day_df[
+                        (~first_day_df["is_preferred"])
+                        & (first_day_df["market_cap"] >= config.min_market_cap)
+                        & (first_day_df["trading_val"] >= config.min_trading_val)
                     ].copy()
 
-                # ── Momentum & Volatility (bias-free price-based factors) ──
-                if config.use_momentum or config.use_low_volatility:
-                    if current_month in monthly_close:
-                        past_month = current_month - config.momentum_window
-                        if config.use_momentum and past_month in monthly_close:
-                            past_prices = monthly_close[past_month]
-                            universe = universe.merge(
-                                past_prices.rename("price_12m_ago"),
-                                on="code",
-                                how="left",
-                            )
-                            universe["momentum"] = (
-                                universe["close"] / universe["price_12m_ago"]
-                            ) - 1
-                            universe = universe[universe["momentum"] > -1].copy()
+                    if config.max_market_cap > 0:
+                        universe = universe[
+                            universe["market_cap"] <= config.max_market_cap
+                        ]
 
-                        if config.use_low_volatility:
-                            vol_prices = []
-                            for idx in range(1, config.momentum_window + 1):
-                                ym = current_month - idx
-                                if ym in monthly_close:
-                                    vol_prices.append(
-                                        monthly_close[ym].rename(f"p_{idx}")
-                                    )
-                            if len(vol_prices) >= 6:
-                                vol_df = pd.concat(vol_prices, axis=1)
-                                vol_df.columns = [
-                                    f"p_{i + 1}" for i in range(len(vol_prices))
-                                ]
-                                monthly_returns = vol_df.pct_change(
-                                    axis=1, fill_method=None
-                                ).iloc[:, 1:]
-                                vol_series = (
-                                    monthly_returns.std(axis=1)
-                                    .dropna()
-                                    .rename("volatility")
-                                )
+                    # ── 적자 기업(음수 PER)은 "저PER"로 오스코어 유입 방지 ──
+                    if config.exclude_negative_per:
+                        universe = universe[universe["per"] > 0].copy()
+
+                    # ── Percentile-based fundamental filters (intersection) ──
+                    if config.use_multi_factor:
+                        for col in ["pbr", "div", "bps", "eps"]:
+                            if col not in universe.columns:
+                                universe[col] = float("nan")
+                        universe["roe"] = universe["eps"] / universe["bps"]
+                        pbr_r = universe["pbr"].rank(pct=True)
+                        universe = universe[
+                            (pbr_r <= config.pbr_pctile) & (universe["pbr"] >= 0)
+                        ].copy()
+
+                    # ── Momentum & Volatility (bias-free price-based factors) ──
+                    if config.use_momentum or config.use_low_volatility:
+                        if current_month in monthly_close:
+                            past_month = current_month - config.momentum_window
+                            if config.use_momentum and past_month in monthly_close:
+                                past_prices = monthly_close[past_month]
                                 universe = universe.merge(
-                                    vol_series, on="code", how="left"
+                                    past_prices.rename("price_12m_ago"),
+                                    on="code",
+                                    how="left",
+                                )
+                                universe["momentum"] = (
+                                    universe["close"] / universe["price_12m_ago"]
+                                ) - 1
+                                universe = universe[universe["momentum"] > -1].copy()
+
+                            if config.use_low_volatility:
+                                vol_prices = []
+                                for idx in range(1, config.momentum_window + 1):
+                                    ym = current_month - idx
+                                    if ym in monthly_close:
+                                        vol_prices.append(
+                                            monthly_close[ym].rename(f"p_{idx}")
+                                        )
+                                if len(vol_prices) >= 6:
+                                    vol_df = pd.concat(vol_prices, axis=1)
+                                    vol_df.columns = [
+                                        f"p_{i + 1}" for i in range(len(vol_prices))
+                                    ]
+                                    monthly_returns = vol_df.pct_change(
+                                        axis=1, fill_method=None
+                                    ).iloc[:, 1:]
+                                    vol_series = (
+                                        monthly_returns.std(axis=1)
+                                        .dropna()
+                                        .rename("volatility")
+                                    )
+                                    universe = universe.merge(
+                                        vol_series, on="code", how="left"
+                                    )
+
+                    # ── Dynamic scoring ──
+                    score_components = []
+
+                    if config.use_katsenelson:
+                        # ── 카스넬슨 가치투자: 품질 필터 + 가치 스코어링 ──
+                        fin_cols = [
+                            "cash",
+                            "total_liabilities",
+                            "total_equity",
+                            "borrowings",
+                            "operating_income",
+                            "interest_paid",
+                            "operating_cf",
+                            "capex",
+                            "current_assets",
+                            "net_income",
+                            "depreciation",
+                            "revenue",
+                            "revenue_3y_ago",
+                            "operating_income_3y_ago",
+                            "net_income_3y_ago",
+                        ]
+                        for col in fin_cols:
+                            if col not in universe.columns:
+                                universe[col] = float("nan")
+
+                        universe = universe[universe["total_equity"].notna()].copy()
+                        if universe.empty:
+                            if not _katsenelson_empty_warned[0]:
+                                print(
+                                    f"  ⚠️ [카스넬슨] {current_month}: 재무데이터가 있는 종목이 없어 "
+                                    "유니버스 전멸 → 전량 현금화 (DART 수집 상태 확인 필요)"
+                                )
+                                _katsenelson_empty_warned[0] = True
+                            target_stocks = universe
+                        else:
+                            for col in fin_cols:
+                                universe[col] = pd.to_numeric(
+                                    universe[col], errors="coerce"
                                 )
 
-                # ── Dynamic scoring ──
-                score_components = []
-
-                if config.use_katsenelson:
-                    # ── 카스넬슨 가치투자: 품질 필터 + 가치 스코어링 ──
-                    fin_cols = [
-                        "cash",
-                        "total_liabilities",
-                        "total_equity",
-                        "borrowings",
-                        "operating_income",
-                        "interest_paid",
-                        "operating_cf",
-                        "capex",
-                        "current_assets",
-                        "net_income",
-                        "depreciation",
-                        "revenue",
-                        "revenue_3y_ago",
-                        "operating_income_3y_ago",
-                        "net_income_3y_ago",
-                    ]
-                    for col in fin_cols:
-                        if col not in universe.columns:
-                            universe[col] = float("nan")
-
-                    universe = universe[universe["total_equity"].notna()].copy()
-                    if universe.empty:
-                        target_stocks = universe
-                    else:
-                        for col in fin_cols:
-                            universe[col] = pd.to_numeric(
-                                universe[col], errors="coerce"
+                            metrics_df = universe.apply(
+                                lambda r: pd.Series(
+                                    build_financial_metrics(
+                                        r.to_dict(), r["market_cap"]
+                                    )
+                                ),
+                                axis=1,
                             )
+                            universe = pd.concat([universe, metrics_df], axis=1)
 
-                        metrics_df = universe.apply(
-                            lambda r: pd.Series(
-                                build_financial_metrics(r.to_dict(), r["market_cap"])
-                            ),
-                            axis=1,
-                        )
-                        universe = pd.concat([universe, metrics_df], axis=1)
-
-                        # 품질 필터 (하드 스크린)
-                        # ROIC/D-E/FCF-Yield는 필수 조건. 이자보상/EV-EBITDA는
-                        # 데이터가 있을 때만 적용 (무부채·이자없는 기업 불이익 방지).
-                        roic_ok = universe["roic"].notna() & (
-                            universe["roic"] >= config.min_roic
-                        )
-                        de_ok = universe["debt_to_equity"].notna() & (
-                            universe["debt_to_equity"] <= config.max_debt_equity
-                        )
-                        fy_ok = universe["fcf_yield"].notna() & (
-                            universe["fcf_yield"] >= config.min_fcf_yield
-                        )
-                        q = roic_ok & de_ok & fy_ok
-
-                        # 이자보상배율: 데이터가 있는 종목만 하드 필터 적용
-                        if config.min_interest_coverage > 0:
-                            ic_data = universe["interest_coverage"].notna()
-                            ic_ok = ~ic_data | (
-                                universe["interest_coverage"]
-                                >= config.min_interest_coverage
+                            # 품질 필터 (하드 스크린)
+                            # ROIC/D-E/FCF-Yield는 필수 조건. 이자보상/EV-EBITDA는
+                            # 데이터가 있을 때만 적용 (무부채·이자없는 기업 불이익 방지).
+                            roic_ok = universe["roic"].notna() & (
+                                universe["roic"] >= config.min_roic
                             )
-                            q &= ic_ok
-
-                        # EV/EBITDA: 데이터가 있는 종목만 하드 필터 적용
-                        if config.max_ev_ebitda > 0:
-                            ev_data = universe["ev_ebitda"].notna()
-                            ev_ok = ~ev_data | (
-                                universe["ev_ebitda"] <= config.max_ev_ebitda
+                            de_ok = universe["debt_to_equity"].notna() & (
+                                universe["debt_to_equity"] <= config.max_debt_equity
                             )
-                            q &= ev_ok
+                            fy_ok = universe["fcf_yield"].notna() & (
+                                universe["fcf_yield"] >= config.min_fcf_yield
+                            )
+                            q = roic_ok & de_ok & fy_ok
 
-                        universe = universe[q].copy()
+                            # 이자보상배율: 데이터가 있는 종목만 하드 필터 적용
+                            if config.min_interest_coverage > 0:
+                                ic_data = universe["interest_coverage"].notna()
+                                ic_ok = ~ic_data | (
+                                    universe["interest_coverage"]
+                                    >= config.min_interest_coverage
+                                )
+                                q &= ic_ok
 
-                        if not universe.empty:
-                            # ── 가치 + 성장 스코어링 (Q-G-V 3요소) ──
-                            score_components = []
+                            # EV/EBITDA: 데이터가 있는 종목만 하드 필터 적용
+                            if config.max_ev_ebitda > 0:
+                                ev_data = universe["ev_ebitda"].notna()
+                                ev_ok = ~ev_data | (
+                                    universe["ev_ebitda"] <= config.max_ev_ebitda
+                                )
+                                q &= ev_ok
 
-                            # Q (질) 은 이미 하드 필터로 처리됨.
-                            # G (성장): 3년 매출/영업이익 CAGR 순위 (높을수록 좋음)
-                            if config.katsenelson_use_growth:
-                                universe["rank_revenue_cagr"] = universe[
-                                    "revenue_cagr_3y"
-                                ].rank(ascending=False, pct=True)
-                                universe["rank_oi_cagr"] = universe["oi_cagr_3y"].rank(
+                            universe = universe[q].copy()
+
+                            if not universe.empty:
+                                # ── 가치 + 성장 스코어링 (Q-G-V 3요소) ──
+                                score_components = []
+
+                                # Q (질) 은 이미 하드 필터로 처리됨.
+                                # G (성장): 3년 매출/영업이익 CAGR 순위 (높을수록 좋음)
+                                if config.katsenelson_use_growth:
+                                    universe["rank_revenue_cagr"] = universe[
+                                        "revenue_cagr_3y"
+                                    ].rank(ascending=False, pct=True)
+                                    universe["rank_oi_cagr"] = universe[
+                                        "oi_cagr_3y"
+                                    ].rank(ascending=False, pct=True)
+                                    score_components.extend(
+                                        ["rank_revenue_cagr", "rank_oi_cagr"]
+                                    )
+
+                                # V (가격): 낮을수록 좋은 지표들 순위
+                                universe["rank_ev_ebitda"] = universe["ev_ebitda"].rank(
+                                    pct=True
+                                )
+                                universe["rank_per"] = universe["per"].rank(pct=True)
+                                universe["rank_fcf_yield"] = universe["fcf_yield"].rank(
                                     ascending=False, pct=True
                                 )
                                 score_components.extend(
-                                    ["rank_revenue_cagr", "rank_oi_cagr"]
+                                    [
+                                        "rank_ev_ebitda",
+                                        "rank_per",
+                                        "rank_fcf_yield",
+                                    ]
                                 )
 
-                            # V (가격): 낮을수록 좋은 지표들 순위
-                            universe["rank_ev_ebitda"] = universe["ev_ebitda"].rank(
-                                pct=True
-                            )
-                            universe["rank_per"] = universe["per"].rank(pct=True)
-                            universe["rank_fcf_yield"] = universe["fcf_yield"].rank(
-                                ascending=False, pct=True
-                            )
-                            score_components.extend(
-                                [
-                                    "rank_ev_ebitda",
-                                    "rank_per",
-                                    "rank_fcf_yield",
-                                ]
-                            )
+                                # NCAV는 그레이엄 net-net 보조 팩터 (선택)
+                                if config.katsenelson_use_ncav:
+                                    universe["rank_ncav"] = universe["ncav_ratio"].rank(
+                                        ascending=False, pct=True
+                                    )
+                                    score_components.append("rank_ncav")
 
-                            # NCAV는 그레이엄 net-net 보조 팩터 (선택)
-                            if config.katsenelson_use_ncav:
-                                universe["rank_ncav"] = universe["ncav_ratio"].rank(
-                                    ascending=False, pct=True
-                                )
-                                score_components.append("rank_ncav")
+                                # 모멘텀/저변동성이 켜져 있으면 보조 팩터로 추가
+                                if (
+                                    config.use_momentum
+                                    and "momentum" in universe.columns
+                                ):
+                                    universe["rank_momentum"] = universe[
+                                        "momentum"
+                                    ].rank(ascending=False, pct=True)
+                                    score_components.append("rank_momentum")
+                                if (
+                                    config.use_low_volatility
+                                    and "volatility" in universe.columns
+                                ):
+                                    universe["rank_vol"] = universe["volatility"].rank(
+                                        pct=True
+                                    )
+                                    score_components.append("rank_vol")
 
-                            # 모멘텀/저변동성이 켜져 있으면 보조 팩터로 추가
-                            if config.use_momentum and "momentum" in universe.columns:
-                                universe["rank_momentum"] = universe["momentum"].rank(
-                                    ascending=False, pct=True
-                                )
-                                score_components.append("rank_momentum")
-                            if (
-                                config.use_low_volatility
-                                and "volatility" in universe.columns
-                            ):
-                                universe["rank_vol"] = universe["volatility"].rank(
-                                    pct=True
-                                )
-                                score_components.append("rank_vol")
-
-                elif config.use_momentum and "momentum" in universe.columns:
-                    universe["rank_momentum"] = universe["momentum"].rank(
-                        ascending=False, pct=True
-                    )
-                    score_components.append("rank_momentum")
-                else:
-                    universe["rank_per"] = universe["per"].rank(pct=True)
-                    score_components.append("rank_per")
-
-                if config.use_multi_factor:
-                    universe["rank_roe"] = universe["roe"].rank(
-                        ascending=False, pct=True
-                    )
-                    universe["rank_div"] = (
-                        universe["div"].fillna(0).rank(ascending=False, pct=True)
-                    )
-                    score_components.extend(["rank_roe", "rank_div"])
-
-                if config.use_low_volatility and "volatility" in universe.columns:
-                    universe["rank_vol"] = universe["volatility"].rank(pct=True)
-                    score_components.append("rank_vol")
-
-                universe["score"] = universe[score_components].sum(axis=1)
-                target_stocks = universe.sort_values(by="score").head(n_stocks)
-
-                # Determine which current stocks to keep (partial turnover)
-                if current_portfolio and config.max_turnover < 1.0:
-                    target_codes = set(target_stocks["code"])
-                    if "score" in target_stocks.columns:
-                        target_sort_key = dict(
-                            zip(target_stocks["code"], target_stocks["score"])
+                    elif config.use_momentum and "momentum" in universe.columns:
+                        universe["rank_momentum"] = universe["momentum"].rank(
+                            ascending=False, pct=True
                         )
-                        overlap = [
-                            (a, target_sort_key[a["code"]])
-                            for a in current_portfolio
-                            if a["code"] in target_codes
-                        ]
-                        overlap.sort(key=lambda x: x[1])
+                        score_components.append("rank_momentum")
                     else:
-                        target_sort_key = dict(
-                            zip(target_stocks["code"], target_stocks["per"])
-                        )
-                        overlap = [
-                            (a, target_sort_key[a["code"]])
-                            for a in current_portfolio
-                            if a["code"] in target_codes
-                        ]
-                        overlap.sort(key=lambda x: x[1])
-                    n_keep = n_stocks - max(1, int(n_stocks * config.max_turnover))
-                    keep_map = {a["code"] for a, _ in overlap[:n_keep]}
-                    to_sell = [
-                        a for a in current_portfolio if a["code"] not in keep_map
-                    ]
-                    to_keep = [a for a in current_portfolio if a["code"] in keep_map]
-                else:
-                    to_sell = current_portfolio[:] if current_portfolio else []
-                    to_keep = []
+                        universe["rank_per"] = universe["per"].rank(pct=True)
+                        score_components.append("rank_per")
 
-                # Execute sells (volume-based slippage)
-                if to_sell:
-                    sell_amount = 0
-                    for asset in to_sell:
-                        stock_info = first_day_df[first_day_df["code"] == asset["code"]]
-                        if stock_info.empty:
-                            exec_sell_price = asset["buy_price"] * 0.1
-                            eff_slippage = slippage
+                    if config.use_multi_factor:
+                        universe["rank_roe"] = universe["roe"].rank(
+                            ascending=False, pct=True
+                        )
+                        universe["rank_div"] = (
+                            universe["div"].fillna(0).rank(ascending=False, pct=True)
+                        )
+                        score_components.extend(["rank_roe", "rank_div"])
+
+                    if config.use_low_volatility and "volatility" in universe.columns:
+                        universe["rank_vol"] = universe["volatility"].rank(pct=True)
+                        score_components.append("rank_vol")
+
+                    universe["score"] = universe[score_components].sum(axis=1)
+                    target_stocks = universe.sort_values(by="score").head(n_stocks)
+
+                    # Determine which current stocks to keep (partial turnover)
+                    if current_portfolio and config.max_turnover < 1.0:
+                        target_codes = set(target_stocks["code"])
+                        if "score" in target_stocks.columns:
+                            target_sort_key = dict(
+                                zip(target_stocks["code"], target_stocks["score"])
+                            )
+                            overlap = [
+                                (a, target_sort_key[a["code"]])
+                                for a in current_portfolio
+                                if a["code"] in target_codes
+                            ]
+                            overlap.sort(key=lambda x: x[1])
                         else:
-                            exec_sell_price = stock_info.iloc[0]["close"]
-                            trade_val = stock_info.iloc[0]["trading_val"]
-                            gross_sell_value = asset["shares"] * exec_sell_price
-                            eff_slippage = (
-                                min(slippage, (gross_sell_value / trade_val) * 0.5)
-                                if trade_val > 0
-                                else slippage
+                            target_sort_key = dict(
+                                zip(target_stocks["code"], target_stocks["per"])
                             )
-                        gross_sell_value = asset["shares"] * exec_sell_price
-                        net_sell_val = (
-                            gross_sell_value * (1 - eff_slippage) * (1 - sell_cost)
-                        )
-                        month_cost += gross_sell_value - net_sell_val
-                        sell_amount += net_sell_val
-                    cash += sell_amount
+                            overlap = [
+                                (a, target_sort_key[a["code"]])
+                                for a in current_portfolio
+                                if a["code"] in target_codes
+                            ]
+                            overlap.sort(key=lambda x: x[1])
+                        n_keep = n_stocks - max(1, int(n_stocks * config.max_turnover))
+                        keep_map = {a["code"] for a, _ in overlap[:n_keep]}
+                        to_sell = [
+                            a for a in current_portfolio if a["code"] not in keep_map
+                        ]
+                        to_keep = [
+                            a for a in current_portfolio if a["code"] in keep_map
+                        ]
+                    else:
+                        to_sell = current_portfolio[:] if current_portfolio else []
+                        to_keep = []
 
-                # Execute buys (volume-based slippage)
-                new_portfolio = to_keep[:]
-                keep_codes = {a["code"] for a in to_keep}
-                n_new = n_stocks - len(to_keep)
-                if n_new > 0 and cash > 0:
-                    new_to_buy = target_stocks[
-                        ~target_stocks["code"].isin(keep_codes)
-                    ].head(n_new)
-                    if len(new_to_buy) > 0:
-                        target_cash_per_stock = cash / len(new_to_buy)
-                        for _, row in new_to_buy.iterrows():
-                            trade_val = row["trading_val"]
-                            req_shares = int(
-                                target_cash_per_stock
-                                / (row["close"] * (1 + slippage) * (1 + buy_cost))
-                            )
-                            if req_shares <= 0:
-                                continue
-                            order_value = req_shares * row["close"]
-                            eff_slippage = (
-                                min(slippage, (order_value / trade_val) * 0.5)
-                                if trade_val > 0
-                                else slippage
-                            )
-                            exec_buy_price = row["close"] * (1 + eff_slippage)
-                            shares = int(
-                                target_cash_per_stock
-                                / (exec_buy_price * (1 + buy_cost))
-                            )
-                            if shares > 0:
-                                actual_cost = shares * exec_buy_price * (1 + buy_cost)
-                                month_cost += actual_cost - (shares * row["close"])
-                                cash -= actual_cost
-                                new_portfolio.append(
-                                    {
-                                        "code": row["code"],
-                                        "shares": shares,
-                                        "buy_price": row["close"],
-                                    }
+                    # Execute sells (volume-based slippage)
+                    if to_sell:
+                        sell_amount = 0
+                        for asset in to_sell:
+                            stock_info = first_day_df[
+                                first_day_df["code"] == asset["code"]
+                            ]
+                            if stock_info.empty:
+                                exec_sell_price = asset["buy_price"] * 0.1
+                                eff_slippage = slippage
+                            else:
+                                exec_sell_price = stock_info.iloc[0]["close"]
+                                trade_val = stock_info.iloc[0]["trading_val"]
+                                gross_sell_value = asset["shares"] * exec_sell_price
+                                eff_slippage = (
+                                    min(slippage, (gross_sell_value / trade_val) * 0.5)
+                                    if trade_val > 0
+                                    else slippage
                                 )
+                                if track_stats is not None and trade_val > 0:
+                                    track_stats["sell_ratios"].append(
+                                        gross_sell_value / trade_val
+                                    )
+                            gross_sell_value = asset["shares"] * exec_sell_price
+                            net_sell_val = (
+                                gross_sell_value * (1 - eff_slippage) * (1 - sell_cost)
+                            )
+                            month_cost += gross_sell_value - net_sell_val
+                            sell_amount += net_sell_val
+                        cash += sell_amount
 
-                current_portfolio = new_portfolio
-                total_cost_spent += month_cost
+                    # Execute buys (volume-based slippage)
+                    new_portfolio = to_keep[:]
+                    keep_codes = {a["code"] for a in to_keep}
+                    n_new = n_stocks - len(to_keep)
+                    if n_new > 0 and cash > 0:
+                        new_to_buy = target_stocks[
+                            ~target_stocks["code"].isin(keep_codes)
+                        ].head(n_new)
+                        if len(new_to_buy) > 0:
+                            target_cash_per_stock = cash / len(new_to_buy)
+                            for _, row in new_to_buy.iterrows():
+                                trade_val = row["trading_val"]
+                                req_shares = int(
+                                    target_cash_per_stock
+                                    / (row["close"] * (1 + slippage) * (1 + buy_cost))
+                                )
+                                if req_shares <= 0:
+                                    continue
+                                order_value = req_shares * row["close"]
+                                eff_slippage = (
+                                    min(slippage, (order_value / trade_val) * 0.5)
+                                    if trade_val > 0
+                                    else slippage
+                                )
+                                if track_stats is not None and trade_val > 0:
+                                    track_stats["buy_ratios"].append(
+                                        order_value / trade_val
+                                    )
+                                exec_buy_price = row["close"] * (1 + eff_slippage)
+                                shares = int(
+                                    target_cash_per_stock
+                                    / (exec_buy_price * (1 + buy_cost))
+                                )
+                                if shares > 0:
+                                    actual_cost = (
+                                        shares * exec_buy_price * (1 + buy_cost)
+                                    )
+                                    month_cost += actual_cost - (shares * row["close"])
+                                    cash -= actual_cost
+                                    new_portfolio.append(
+                                        {
+                                            "code": row["code"],
+                                            "shares": shares,
+                                            "buy_price": row["close"],
+                                        }
+                                    )
+
+                    current_portfolio = new_portfolio
+                    total_cost_spent += month_cost
 
         # ── LAST DAY: mark-to-market for reporting ──
         last_day_df = month_df[month_df["date"] == last_day]

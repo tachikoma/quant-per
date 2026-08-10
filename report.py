@@ -30,14 +30,18 @@ def fetch_kospi_benchmark(
 
     if not existing.empty:
         existing = existing[~existing.index.duplicated(keep="last")]
-        cached_min = existing.index.min()
         cached_max = existing.index.max()
 
-        if cached_min <= start_ts and cached_max >= end_ts:
+        # 캐시가 end까지 덮고 있으면 캐시만 사용 (start 불일치 무관).
+        # start가 캐시 시작보다 앞서면 loc 가 그 이후 첫 행부터 반환한다.
+        if not pd.isna(cached_max) and cached_max >= end_ts:
             return existing.loc[start_ts:end_ts]
 
-        # Find missing ranges
-        all_dates = pd.bdate_range(start=start_ts, end=end_ts, freq="B")
+        # fetch 범위: 캐시 이후만. (캐시 안쪽 공휴일 누락은 재조회하지 않음)
+        fetch_start = cached_max + pd.Timedelta(days=1)
+        if fetch_start >= end_ts:
+            return existing.loc[start_ts:end_ts]
+        all_dates = pd.bdate_range(start=fetch_start, end=end_ts, freq="B")
         cached_dates = existing.index.unique()
         missing = all_dates[~all_dates.isin(cached_dates)]
     else:
@@ -67,10 +71,17 @@ def fetch_kospi_benchmark(
 
 
 def align_to_dates(kospi: pd.DataFrame, dates: list) -> pd.DataFrame:
+    """각 평가일에 해당하는 KOSPI 종가를 반환.
+
+    평가일과 같은 날짜가 있으면 그 값을, 없으면 직전 영업일 값을 사용한다.
+    (미래 값은 사용하지 않는다 — 평가일 이후 첫 행을 쓰는 것은
+    벤치마크 수익률을 미래로 어긋나게 하는 버그였다.)
+    """
     rows = []
     for d in dates:
-        m = kospi[kospi.index >= pd.Timestamp(d)]
-        close = m.iloc[0]["kospi_close"] if not m.empty else None
+        ts = pd.Timestamp(d)
+        m = kospi[kospi.index <= ts]
+        close = m.iloc[-1]["kospi_close"] if not m.empty else None
         rows.append({"date": d, "kospi_close": close})
     return pd.DataFrame(rows)
 

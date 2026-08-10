@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 .cache/
+results/phase*_run.txt
+results/phase1_after_fix.txt
+results/phase1_after_periodfix.txt

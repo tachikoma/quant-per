@@ -1,0 +1,62 @@
+572d7bff3251a915b43786f664cf98d7655c497d
+=== git commit ===
+572d7bff3251a915b43786f664cf98d7655c497d
+
+=== .env 설정 ===
+# ==========================================
+# KRX API 인증 (pykrx 로그인 필수)
+# ==========================================
+KRX_ID=REDACTED
+KRX_PW=REDACTED
+
+DART_API_KEY=REDACTED
+
+# ==========================================
+# 백테스트 기본 환경 변수 설정 (.env)
+# ==========================================
+# 테스트 기간
+BACKTEST_START_DATE=2016-01-01
+BACKTEST_END_DATE=2026-12-31
+
+# 초기 투자금 (원 단위)
+INITIAL_CAPITAL=10000000
+
+# 거래 비용 비율 (예: 0.015% -> 0.00015)
+BUY_COST=0.00015
+SELL_COST=0.0023
+SLIPPAGE=0.002
+
+USE_MULTI_FACTOR=True
+USE_MOMENTUM=False
+USE_LOW_VOLATILITY=False
+
+# 비용 절감을 위한 조정
+MAX_TURNOVER=0.5        # 절반만 교체 → 비용 절감
+REBALANCE_FREQ=quarterly # 재조정 주기 (daily, weekly, monthly, quarterly, yearly)
+
+
+# 유니버스 및 전략 파라미터
+N_STOCKS=30
+PER_PCTILE=0.2
+PBR_PCTILE=0.1
+ROE_PCTILE=0.5
+MIN_MARKET_CAP=20000000000
+MIN_TRADING_VAL=1000000000
+MAX_MARKET_CAP=1000000000000
+
+=== 캐시 스냅샷 ===
+     130
+2016-01.parquet
+2016-02.parquet
+2016-03.parquet
+...
+2026-05.parquet
+2026-06.parquet
+2026-07.parquet
+
+=== kospi 캐시 ===
+-rw-r--r--@ 1 durkjaeyun  staff  41665 Aug  7 15:45 .cache/backtest/kospi.parquet
+-rw-r--r--@ 1 durkjaeyun  staff  45823 Aug  7 15:56 .cache/backtest/kospi_ma.parquet
+
+=== DART 캐시 ===
+    3272

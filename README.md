@@ -23,6 +23,13 @@ pykrx 기반 KRX 실거래 데이터 + DART 재무제표로 가치투자/모멘�
 ├── report.py            # KOSPI 벤치마크 비교 + 결과 리포트 출력
 ├── experiments.py       # 배치 실험 (전략 비교)
 ├── compare_strategies.py # 캐시 기반 전략 성과 비교 (pykrx 호출 없음)
+├── VALIDATION_PLAN.md   # 최종 검증 계획 (Phase 1~7)
+├── VALIDATION_REPORT.md # 최종 판정서 (전략 계속/중단 판정)
+├── phase1_reproducibility.py  # 재현성 검증 (캐시 전용)
+├── phase3_baselines.py  # 기준선·MA200 분해
+├── phase4_cost_stress.py # 비용·체결 스트레스
+├── phase5_parameter_stability.py # 파라미터 안정성 그리드
+├── phase6_oos.py        # OOS 폴드 진단 + 미래 OOS 체크포인트
 ├── pyproject.toml       # 프로젝트 메타데이터 및 의존성
 ├── .env                 # 전략 파라미터 (KRX_ID, DART_API_KEY 등)
 └── .env.sample          # .env 예시 (secret 제외)
@@ -66,6 +73,9 @@ cp .env.sample .env
 | `USE_MULTI_FACTOR` | true | 멀티팩터 스코어링 (PER/ROE/배당) 사용 |
 | `USE_MOMENTUM` | false | 12개월 모멘텀 팩터 사용 |
 | `USE_LOW_VOLATILITY` | false | 저변동성 팩터 사용 |
+| `EXCLUDE_NEGATIVE_PER` | false | 음수 PER(적자기업) 종목 제외 (권장: true — 검증서 PBR +3.55→+5.58) |
+| `USE_MARKET_REGIME` | true | KOSPI 200일선 시장 레짐 필터 (false 시 항상 풀투자) |
+| `MA_WINDOW` | 200 | 시장 레짐 이동평균 기간 |
 | `USE_KATSENELSON` | false | 카스넬슨 가치투자 (DART 재무제표) |
 | `MIN_ROIC` | 0.10 | 카스넬슨: ROIC 하한 |
 | `MAX_DEBT_EQUITY` | 1.5 | 카스넬슨: 차입금/자본 비율 상한 |
@@ -82,6 +92,19 @@ uv run python backtest.py          # 기본 백테스트
 uv run python collect_dart_data.py # DART 재무제표 수집 (카스넬슨 전용)
 uv run python experiments.py       # 배치 실험
 uv run python compare_strategies.py # 전략별 성과 비교 (캐시 데이터, pykrx 호출 없음)
+```
+
+### 최종 검증 (Validation)
+
+`VALIDATION_PLAN.md`의 Phase 1~7 게이트를 통과한 전략만 개선합니다. 전부 캐시 전용 실행:
+
+```bash
+uv run python phase1_reproducibility.py          # 재현성 (5개 전략, 2016-2026)
+uv run python phase3_baselines.py                # 기준선·MA200 분해
+uv run python phase4_cost_stress.py              # 비용·체결 스트레스
+uv run python phase5_parameter_stability.py      # 파라미터 안정성 그리드
+uv run python phase6_oos.py                      # OOS 폴드 진단
+uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31  # 미래 OOS (데이터 수집 후)
 ```
 
 ## 엔진 동작 방식
@@ -105,11 +128,14 @@ uv run python compare_strategies.py # 전략별 성과 비교 (캐시 데이터,
    - 일 20,000건 / 분당 1,000회 API 한도 자동 준수
 
 4. **백테스트** (`engine.py:run_backtest`)
+   - `start_date`~`end_date` 기간 필터 (기간 밖 데이터 제외)
    - 월간/분기간 리밸런싱: 초일(첫 거래일) 매도 + 매수
    - 보통주만 (우선주 제외)
    - 시총/거래대금 필터링 → 전략별 필터/스코어링으로 종목 선정
    - **거래대금 기반 슬리피지**: 주문금액/일거래대금 × 0.5 (cap=SLIPPAGE)
    - **부분 리밸런싱**: `max_turnover` 이하로만 포트폴리오 교체 (비용 절감)
+   - **시장 레짐**: KOSPI 종가 < MA200(=`MA_WINDOW`)이면 전량 현금화, ≥ 이면 정상 리밸런싱 (`USE_MARKET_REGIME=false` 시 비활성)
+   - **음수 PER 제외**: `EXCLUDE_NEGATIVE_PER=true` 시 적자기업 제외 (기본 false — 이전 동작 유지)
    - 상장폐지 시 보수적 가정 (원금 10% 회수)
 
 ### 스코어링 방식
@@ -127,46 +153,28 @@ uv run python compare_strategies.py # 전략별 성과 비교 (캐시 데이터,
 
 ## 백테스트 결과
 
-### 전략 1: PBR + 멀티팩터
-설정: PBR 하위 30%, PER+ROE+배당 스코어링, 시총 200억~1조, 월별, 30종목
+> 아래는 **최종 검증 기준선(2016-01-01 ~ 2026-06-30, 캐시 전용)** 결과입니다.
+> 이전 문서 수치(M2 +8.02%, PBR +0.84%)는 다른 기간·설정(2008-2026, 월별/하위30%) 결과로
+> 현재 캐시로 재현 불가 — 검증 과정에서 스테일 문서로 확정.
+> 전체 판정 근거는 `VALIDATION_REPORT.md` 참조.
 
-| 지표 | 전략 | KOSPI |
-|------|------|-------|
-| 누적 수익률 (10년) | **+0.84%** | +341.77% |
-| CAGR | **0.08%** | ~16% |
-| MDD | -44.12% | - |
-| 종목 수 | 평균 29.8 | 30 목표 |
+### 전체 기간 성과 (Phase 1~3, 캐시 전용)
 
-> 강세장에서 저PBR 전략의 한계: KOSPI 대비 크게 언더퍼폼.
-> 가격 기반 팩터(모멘텀)와 결합 시 보완 가능.
+| 전략 | CAGR | 누적 | MDD | Sharpe |
+|------|------|------|-----|--------|
+| 동일유니버스 동일가중 (기준선) | -7.79% | -57.3% | -66.3% | -0.27 |
+| M2: 모멘텀+저변동성 | -0.97% | -9.7% | -32.6% | 0.05 |
+| K1: 카스넬슨 가치투자 | +0.29% | +3.1% | -30.7% | 0.11 |
+| K3: 카스넬슨+저변동성 | +1.11% | +12.3% | -25.1% | 0.16 |
+| K2: 카스넬슨+모멘텀 | +1.55% | +17.5% | -33.2% | 0.18 |
+| PBR: 멀티팩터 | +3.55% | +44.2% | -28.2% | 0.31 |
 
-### 전략 2: 모멘텀 + 저변동성
+KOSPI 동기간 **+341.77%** 대비 모든 전략이 절대 열위. 유니버스 동일가중이 -57%로
+심각한 음수라 복합 전략은 단순 보유보다 우월하나, KOSPI(대형주 중심) 대비 크게 언더퍼폼.
 
-| 지표 | 전략 | KOSPI |
-|------|------|-------|
-| 누적 수익률 | **+316.34%** (2008-2026) | +353.81% |
-| CAGR | **~8.02%** | ~8.3% |
-| MDD | -47.77% | - |
+### 최종 판정 요약 (VALIDATION_REPORT.md)
 
-> ✅ 가격 데이터만 사용 — look-ahead bias 0. 항상 30종목 풀채움.
-
-### 전략 3: 카스넬슨 가치투자 (2016~2026, DART 재무제표)
-
-설정: Q-G-V 3요소 (질=하드필터, 가치=rank 스코어), NCAV/성장 off 기본
-
-| 지표 | K1 순수 | K3 +저변동성 |
-|------|---------|-------------|
-| CAGR | +0.29% | **+1.11%** |
-| MDD | -30.7% | **-25.1%** |
-
-> ⚠️ NCAV는 Graham net-net 지표로 카스넬슨과 불일치 + 성과 저해 → 기본 off.
-> ⚠️ 3Y 과거 CAGR 성장 팩터도 한국 데이터서 부정적 → 기본 off.
-> 저변동성 결합(K3)이 MDD -25%로 가장 견고.
-
-### 권장 자본별 전략
-
-| 자본 | 추천 전략 | 비고 |
-|:----:|:---------:|------|
-| 1,000만원↑ | 모멘텀+저변동성 | bias-free, 30종목 분산 가능 |
-| 소액 | PBR+멀티팩터 | 저가주 위주 |
-| 리스크 방어 | 카스넬슨+저변동성 | DART 재무제표 기반, MDD -25%로 가장 견고 |
+- **개발 중단**: M2/K1/K2/K3 — OOS 폴드(비겹침 2~3년×4)에서 4개 중 3개 음수, 알파의 시대의존.
+  M2는 MA200 레짐 필터 의존, K1은 파라미터 plateau 부재.
+- **조건부 계속**: PBR — 유일한 잠정 후보. `EXCLUDE_NEGATIVE_PER=true` 반영 시 CAGR
+  +3.55→+5.58. 단 2019-2022에서만 양수인 시장조건 의존성과 미래 OOS 체크포인트 재검증 필요.
