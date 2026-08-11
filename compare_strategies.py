@@ -41,6 +41,8 @@ if __name__ == "__main__":
     # 2016-2026 캐시 기간에 맞춤 (DART 2015년보고서는 2016-04-15부터 사용 가능)
     period = dict(start_date="2016-01-01", end_date="2026-12-31")
 
+    # 동결 설정과 일치하도록 전략별로 명시 (또는 .env의 EXCLUDE_NEGATIVE_PER가
+    # 모든 전략에 암묵 적용돼 M2/K1/K3 결과가 바뀌는 것을 방지)
     strategies = [
         (
             "K1: 카스넬슨 가치투자",
@@ -53,6 +55,7 @@ if __name__ == "__main__":
                 min_roic=0.05,
                 max_ev_ebitda=15.0,
                 max_turnover=0.5,
+                exclude_negative_per=False,
                 **period,
             ),
         ),
@@ -68,6 +71,7 @@ if __name__ == "__main__":
                 min_roic=0.05,
                 max_ev_ebitda=15.0,
                 max_turnover=0.5,
+                exclude_negative_per=False,
                 **period,
             ),
         ),
@@ -82,6 +86,7 @@ if __name__ == "__main__":
                 min_roic=0.05,
                 max_ev_ebitda=15.0,
                 max_turnover=0.5,
+                exclude_negative_per=False,
                 **period,
             ),
         ),
@@ -95,6 +100,7 @@ if __name__ == "__main__":
                 momentum_window=12,
                 use_low_volatility=True,
                 max_turnover=0.5,
+                exclude_negative_per=False,
                 **period,
             ),
         ),
@@ -107,6 +113,7 @@ if __name__ == "__main__":
                 use_momentum=False,
                 use_low_volatility=False,
                 max_turnover=0.5,
+                exclude_negative_per=True,
                 **period,
             ),
         ),

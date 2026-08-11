@@ -208,6 +208,7 @@ def main():
                 use_momentum=False,
                 use_low_volatility=True,
                 max_turnover=0.5,
+                exclude_negative_per=False,
             ),
         ),
         (
@@ -219,6 +220,7 @@ def main():
                 momentum_window=12,
                 use_low_volatility=False,
                 max_turnover=0.5,
+                exclude_negative_per=False,
             ),
         ),
         (
@@ -230,6 +232,7 @@ def main():
                 momentum_window=12,
                 use_low_volatility=True,
                 max_turnover=0.5,
+                exclude_negative_per=False,
             ),
         ),
         (
@@ -241,6 +244,7 @@ def main():
                 use_low_volatility=False,
                 min_roic=0.05,
                 max_ev_ebitda=15.0,
+                exclude_negative_per=False,
             ),
         ),
         (
@@ -252,6 +256,7 @@ def main():
                 use_low_volatility=True,
                 min_roic=0.05,
                 max_ev_ebitda=15.0,
+                exclude_negative_per=False,
             ),
         ),
         (
@@ -264,6 +269,7 @@ def main():
                 use_low_volatility=False,
                 min_roic=0.05,
                 max_ev_ebitda=15.0,
+                exclude_negative_per=False,
             ),
         ),
         (
@@ -274,6 +280,7 @@ def main():
                 use_momentum=False,
                 use_low_volatility=False,
                 max_turnover=0.5,
+                exclude_negative_per=True,
             ),
         ),
     ]
@@ -284,6 +291,7 @@ def main():
         min_roic=0.05,
         max_ev_ebitda=15.0,
         max_turnover=0.5,
+        exclude_negative_per=False,
     )
 
     for label, overrides in variants:
@@ -334,11 +342,20 @@ def main():
                 momentum_window=12,
                 use_low_volatility=True,
                 max_turnover=0.5,
+                exclude_negative_per=False,
             ),
         ),
         ("K1", katsenelson_over),
         ("K3", {**katsenelson_over, "use_low_volatility": True}),
-        ("PBR", dict(use_katsenelson=False, use_multi_factor=True, max_turnover=0.5)),
+        (
+            "PBR",
+            dict(
+                use_katsenelson=False,
+                use_multi_factor=True,
+                max_turnover=0.5,
+                exclude_negative_per=True,
+            ),
+        ),
     ]:
         for regime in [True, False]:
             cfg = replace(

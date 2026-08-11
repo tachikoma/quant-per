@@ -1,8 +1,8 @@
-572d7bff3251a915b43786f664cf98d7655c497d
+acd3947039c50f5c1e246ff9d5a1fd3076790836
 === git commit ===
-572d7bff3251a915b43786f664cf98d7655c497d
+acd3947039c50f5c1e246ff9d5a1fd3076790836
 
-=== .env 설정 ===
+=== .env 설정 (2026-08-11 A-track 재검증 시점, EXCLUDE_NEGATIVE_PER 반영) ===
 # ==========================================
 # KRX API 인증 (pykrx 로그인 필수)
 # ==========================================
@@ -29,6 +29,7 @@ SLIPPAGE=0.002
 USE_MULTI_FACTOR=True
 USE_MOMENTUM=False
 USE_LOW_VOLATILITY=False
+EXCLUDE_NEGATIVE_PER=true   # 적자기업(음수 PER) 제외 — PBR 권장 (검증서 +3.55→+5.58)
 
 # 비용 절감을 위한 조정
 MAX_TURNOVER=0.5        # 절반만 교체 → 비용 절감
@@ -45,18 +46,24 @@ MIN_TRADING_VAL=1000000000
 MAX_MARKET_CAP=1000000000000
 
 === 캐시 스냅샷 ===
-     130
+     128
 2016-01.parquet
 2016-02.parquet
 2016-03.parquet
 ...
-2026-05.parquet
 2026-06.parquet
 2026-07.parquet
+2026-08.parquet
 
 === kospi 캐시 ===
--rw-r--r--@ 1 durkjaeyun  staff  41665 Aug  7 15:45 .cache/backtest/kospi.parquet
--rw-r--r--@ 1 durkjaeyun  staff  45823 Aug  7 15:56 .cache/backtest/kospi_ma.parquet
+-rw-r--r--@ 1 durkjaeyun  staff  41665  kospi.parquet
+-rw-r--r--@ 1 durkjaeyun  staff  45403  kospi_ma.parquet
 
 === DART 캐시 ===
-    3272
+     3272
+
+=== 참고 ===
+초기 스냅샷(phase1 시점, 572d7bf)과 달라진 점:
+- .env에 EXCLUDE_NEGATIVE_PER=true 추가 (2026-08-11 PBR 재동결)
+- market_data 캐시에 2026-08 (08-03~08-10) 추가 (A3 체크포인트용)
+- 검증 스크립트(phase1/phase6/phase7, compare_strategies)는 전략별 exclude_negative_per 명시
