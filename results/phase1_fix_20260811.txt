@@ -1,0 +1,34 @@
+KRX 로그인 시도...
+  로그인 ID: iam00th
+KRX 로그인 완료.
+  로그인 시간: 2026-08-11 09:26:53
+  만료 시간: 2026-08-11 10:26:53
+market_data: 2016-01-04 ~ 2026-07-01, 3465종목
+
+  ▶ K1: 카스넬슨 가치투자 실행 중...
+/Users/durkjaeyun/projects/investment/quant-per/dart_data.py:412: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  return pd.concat(parts, ignore_index=True, sort=False)
+    → CAGR 0.29% / MDD -30.7% / 누적 3.09%
+  ▶ K2: 카스넬슨 + 모멘텀 실행 중...
+/Users/durkjaeyun/projects/investment/quant-per/dart_data.py:412: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  return pd.concat(parts, ignore_index=True, sort=False)
+    → CAGR 1.55% / MDD -33.19% / 누적 17.48%
+  ▶ K3: 카스넬슨 + 저변동성 실행 중...
+/Users/durkjaeyun/projects/investment/quant-per/dart_data.py:412: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+  return pd.concat(parts, ignore_index=True, sort=False)
+    → CAGR 1.11% / MDD -25.08% / 누적 12.31%
+  ▶ M2: 모멘텀 + 저변동성 실행 중...
+    → CAGR -0.97% / MDD -32.56% / 누적 -9.67%
+  ▶ PBR: 멀티팩터 실행 중...
+    → CAGR 5.58% / MDD -33.44% / 누적 76.67%
+
+
+======================================================================
+             전략                    기간  CAGR(%)  MDD(%)  누적수익(%)  KOSPI(%)  Alpha(%)  비용(만원)  최종종목수
+  K1: 카스넬슨 가치투자 2016-01-01~2026-06-30     0.29  -30.70     3.09    341.77   -338.68    54.1     30
+ K2: 카스넬슨 + 모멘텀 2016-01-01~2026-06-30     1.55  -33.19    17.48    341.77   -324.29    62.0     30
+K3: 카스넬슨 + 저변동성 2016-01-01~2026-06-30     1.11  -25.08    12.31    341.77   -329.46    55.7     30
+ M2: 모멘텀 + 저변동성 2016-01-01~2026-06-30    -0.97  -32.56    -9.67    341.77   -351.44    50.3     30
+      PBR: 멀티팩터 2016-01-01~2026-06-30     5.58  -33.44    76.67    341.77   -265.10    96.3     14
+
+저장: results/phase1_reproducibility.csv

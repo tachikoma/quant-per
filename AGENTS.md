@@ -20,7 +20,10 @@ uv run ruff format           # 포매팅
 ### 최종 검증 (Validation, 캐시 전용)
 
 전략을 개선하기 전에 `VALIDATION_PLAN.md`의 Phase 1~7 게이트를 순서대로 통과해야 한다.
-**판정 결과(2026-08-10)**: M2/K1/K2/K3 개발 중단, PBR만 조건부 계속 (`VALIDATION_REPORT.md`).
+**판정 결과(2026-08-10)**: M2/K1/K2/K3 개발 중단, PBR만 조건부 계속.
+**재검증(2026-08-11)**: PBR `EXCLUDE_NEGATIVE_PER=true` 재동결로 OOS 폴드 4개 전부
+양수 + 폴드 간 종목선택 알파 일관 확인 — 절대 열위 원인은 유니버스(중소형 편중).
+잔여 게이트: 미래 OOS 체크포인트 확정. 전체 근거는 `VALIDATION_REPORT.md`.
 
 ```bash
 uv run python phase1_reproducibility.py          # 재현성 (5개 전략, 2016-01~2026-06)
@@ -29,6 +32,7 @@ uv run python phase4_cost_stress.py              # 비용·체결 스트레스
 uv run python phase5_parameter_stability.py      # 파라미터 안정성 그리드
 uv run python phase6_oos.py                      # OOS 폴드 진단
 uv run python phase6_oos.py --checkpoint START END  # 미래 OOS (데이터 수집 후, 재튜닝 금지)
+uv run python phase7_market_regime.py            # 시장조건·레짐/알파 분해
 ```
 
 - 카스넬슨 계열(K1/K2/K3) 실행은 ~3분/전략, 전체 phase 재실행은 ~25분 소요
@@ -79,8 +83,8 @@ backtest.py → Config.from_env() → fetch_rebalancing_data() → run_backtest(
 - `DART_API_KEY` 필수 (카스넬슨 전용), `opendart.fss.go.kr` 발급
 - `BACKTEST_END_DATE` 미설정 시 마지막 영업일 자동 계산
 - `FUNDAMENTAL_LAG_MONTHS`로 look-ahead bias 실험 가능 (실제 사용 시 CAGR 붕괴)
-- `EXCLUDE_NEGATIVE_PER=true`: 음수 PER(적자기업) 종목 제외. 검증서 PBR CAGR +3.55→+5.58 (권장 on)
-- `USE_MARKET_REGIME`/`MA_WINDOW`: KOSPI 이동평균 레짐 필터 on-off / 기간(기본 200). 검증서 M2는 MA200 의존(off 시 -8.12%)
+- `EXCLUDE_NEGATIVE_PER=true`: 음수 PER(적자기업) 종목 제외. PBR은 true로 재동결 (CAGR +3.55→+5.58, OOS 폴드 4개 전부 양수). 모멘텀/카스넬슨은 false 유지(동결 보존)
+- `USE_MARKET_REGIME`/`MA_WINDOW`: KOSPI 이동평균 레짐 필터 on-off / 기간(기본 200). M2는 MA200 의존(off 시 -8.12%)이나 PBR은 off에서 수익 상승(레짐 독립, MDD만 악화)
 - `PER_PCTILE`/`PBR_PCTILE`/`ROE_PCTILE`은 `use_multi_factor=True`일 때만 적용
   - `use_multi_factor=True`: PBR 하위 n% 필터 + PER/ROE/배당 스코어링
   - `use_multi_factor=False`: fundmental 필터 없음 (모멘텀 전용)

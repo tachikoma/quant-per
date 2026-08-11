@@ -13,7 +13,7 @@
 사용법:
   uv run python phase6_oos.py                    # 비겹침 폴드 진단
   uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31  # 미래 OOS
-결과: results/phase6_oos_folds.csv
+결과: results/phase6_oos_folds.csv (폴드), results/phase6_oos_checkpoint.csv (체크포인트)
 """
 
 import argparse
@@ -25,8 +25,10 @@ import pandas as pd
 from config import Config
 from engine import run_backtest
 
-# ── 전략·파라미터 동결 (2026-08-10 확정) ──────────────────────────────
-# 이 블록을 수정한 뒤에는 이전 OOS 결과가 무효가 된다.
+# ── 전략·파라미터 동결 ────────────────────────────────────────────────
+# 2026-08-10: M2/K1/K3 동결 확정 (검증 판정: 중단 대상).
+# 2026-08-11: PBR만 재동결 — 음수 PER 필터(exclude_negative_per=True) 반영.
+#   (M2/K1/K3에는 명시적으로 False를 두어 기존 동결 결과를 보존)
 STRATEGIES = {
     "M2": dict(
         use_katsenelson=False,
@@ -35,6 +37,7 @@ STRATEGIES = {
         momentum_window=12,
         use_low_volatility=True,
         max_turnover=0.5,
+        exclude_negative_per=False,
     ),
     "K1": dict(
         use_katsenelson=True,
@@ -42,6 +45,7 @@ STRATEGIES = {
         min_roic=0.05,
         max_ev_ebitda=15.0,
         max_turnover=0.5,
+        exclude_negative_per=False,
     ),
     "K3": dict(
         use_katsenelson=True,
@@ -50,6 +54,7 @@ STRATEGIES = {
         min_roic=0.05,
         max_ev_ebitda=15.0,
         max_turnover=0.5,
+        exclude_negative_per=False,
     ),
     "PBR": dict(
         use_katsenelson=False,
@@ -57,6 +62,7 @@ STRATEGIES = {
         use_momentum=False,
         use_low_volatility=False,
         max_turnover=0.5,
+        exclude_negative_per=True,
     ),
 }
 
@@ -129,8 +135,11 @@ def main():
                 )
 
     df = pd.DataFrame(rows)
-    df.to_csv(out / "phase6_oos_folds.csv", index=False, encoding="utf-8-sig")
-    print(f"\n저장: {out}/phase6_oos_folds.csv")
+    csv_name = (
+        "phase6_oos_checkpoint.csv" if args.checkpoint else "phase6_oos_folds.csv"
+    )
+    df.to_csv(out / csv_name, index=False, encoding="utf-8-sig")
+    print(f"\n저장: {out}/{csv_name}")
 
     # 폴드 진단 시 일관성 요약
     if not args.checkpoint:

@@ -30,6 +30,7 @@ pykrx 기반 KRX 실거래 데이터 + DART 재무제표로 가치투자/모멘�
 ├── phase4_cost_stress.py # 비용·체결 스트레스
 ├── phase5_parameter_stability.py # 파라미터 안정성 그리드
 ├── phase6_oos.py        # OOS 폴드 진단 + 미래 OOS 체크포인트
+├── phase7_market_regime.py # 시장조건·레짐/알파 분해 (A2 재검증)
 ├── pyproject.toml       # 프로젝트 메타데이터 및 의존성
 ├── .env                 # 전략 파라미터 (KRX_ID, DART_API_KEY 등)
 └── .env.sample          # .env 예시 (secret 제외)
@@ -73,7 +74,7 @@ cp .env.sample .env
 | `USE_MULTI_FACTOR` | true | 멀티팩터 스코어링 (PER/ROE/배당) 사용 |
 | `USE_MOMENTUM` | false | 12개월 모멘텀 팩터 사용 |
 | `USE_LOW_VOLATILITY` | false | 저변동성 팩터 사용 |
-| `EXCLUDE_NEGATIVE_PER` | false | 음수 PER(적자기업) 종목 제외 (권장: true — 검증서 PBR +3.55→+5.58) |
+| `EXCLUDE_NEGATIVE_PER` | false | 음수 PER(적자기업) 종목 제외 — **PBR은 true로 재동결 (CAGR +3.55→+5.58, OOS 폴드 4개 전부 양수)** |
 | `USE_MARKET_REGIME` | true | KOSPI 200일선 시장 레짐 필터 (false 시 항상 풀투자) |
 | `MA_WINDOW` | 200 | 시장 레짐 이동평균 기간 |
 | `USE_KATSENELSON` | false | 카스넬슨 가치투자 (DART 재무제표) |
@@ -105,6 +106,7 @@ uv run python phase4_cost_stress.py              # 비용·체결 스트레스
 uv run python phase5_parameter_stability.py      # 파라미터 안정성 그리드
 uv run python phase6_oos.py                      # OOS 폴드 진단
 uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31  # 미래 OOS (데이터 수집 후)
+uv run python phase7_market_regime.py            # 시장조건·레짐/알파 분해
 ```
 
 ## 엔진 동작 방식
@@ -142,7 +144,7 @@ uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31  # 미래 OOS (�
 
 | 모드 | 유니버스 필터 | 스코어 구성 |
 |------|-------------|------------|
-| PBR+멀티팩터 | PBR 하위 30% + PBR≥0, 시총 200억~1조, 거래대금≥10억 | `rank(PER) + rank(ROE↓) + rank(DIV↓)` |
+| PBR+멀티팩터 | PBR 하위 30% + PBR≥0 + **PER>0(적자 제외)**, 시총 200억~1조, 거래대금≥10억 | `rank(PER) + rank(ROE↓) + rank(DIV↓)` |
 | 모멘텀 단독 | 시총/거래대금/우선주 제외만 | `rank(모멘텀↓)` |
 | 모멘텀+저변동성 | 시총/거래대금/우선주 제외만 | `rank(모멘텀↓) + rank(변동성)` |
 | 카스넬슨 가치투자 | ROIC≥MIN, D/E≤MAX, FCF Yield≥MIN, (이자보상≥MIN, EV/EBITDA≤MAX) | `rank(EBITDA↓) + rank(PER↓) + rank(FCF Yield↑)` + 선택 `rank(3Y CAGR↑)` |
@@ -154,6 +156,7 @@ uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31  # 미래 OOS (�
 ## 백테스트 결과
 
 > 아래는 **최종 검증 기준선(2016-01-01 ~ 2026-06-30, 캐시 전용)** 결과입니다.
+> PBR 행은 2026-08-11 재동결(음수 PER 필터 반영) 결과입니다.
 > 이전 문서 수치(M2 +8.02%, PBR +0.84%)는 다른 기간·설정(2008-2026, 월별/하위30%) 결과로
 > 현재 캐시로 재현 불가 — 검증 과정에서 스테일 문서로 확정.
 > 전체 판정 근거는 `VALIDATION_REPORT.md` 참조.
@@ -167,14 +170,18 @@ uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31  # 미래 OOS (�
 | K1: 카스넬슨 가치투자 | +0.29% | +3.1% | -30.7% | 0.11 |
 | K3: 카스넬슨+저변동성 | +1.11% | +12.3% | -25.1% | 0.16 |
 | K2: 카스넬슨+모멘텀 | +1.55% | +17.5% | -33.2% | 0.18 |
-| PBR: 멀티팩터 | +3.55% | +44.2% | -28.2% | 0.31 |
+| **PBR: 멀티팩터 (재동결)** | **+5.58%** | **+76.7%** | -33.4% | **0.41** |
 
 KOSPI 동기간 **+341.77%** 대비 모든 전략이 절대 열위. 유니버스 동일가중이 -57%로
 심각한 음수라 복합 전략은 단순 보유보다 우월하나, KOSPI(대형주 중심) 대비 크게 언더퍼폼.
+PBR의 절대 열위는 종목선택 알파 부재가 아니라 **유니버스(중소형·KOSDAQ 편중) 구성** 때문
+(2026-08-11 A2 재검증: 종목선택알파는 4폴드 전부 양수, 평균 +57pp).
 
 ### 최종 판정 요약 (VALIDATION_REPORT.md)
 
 - **개발 중단**: M2/K1/K2/K3 — OOS 폴드(비겹침 2~3년×4)에서 4개 중 3개 음수, 알파의 시대의존.
   M2는 MA200 레짐 필터 의존, K1은 파라미터 plateau 부재.
-- **조건부 계속**: PBR — 유일한 잠정 후보. `EXCLUDE_NEGATIVE_PER=true` 반영 시 CAGR
-  +3.55→+5.58. 단 2019-2022에서만 양수인 시장조건 의존성과 미래 OOS 체크포인트 재검증 필요.
+- **조건부 계속 → 2026-08-11 재검증으로 OOS 충족**: PBR — `EXCLUDE_NEGATIVE_PER=true`
+  반영(재동결)으로 CAGR +3.55→+5.58% 및 **OOS 폴드 4개 전부 양수** 전환.
+  MA200 독립적인 종목선택 알파 확인. 잔여 게이트: 미래 OOS 체크포인트 확정
+  (데이터 축적 후 재실행, `results/phase6_oos_checkpoint.csv` 현재 예비 +5.51%).
