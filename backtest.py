@@ -40,6 +40,8 @@ if __name__ == "__main__":
         cache_dir=args.cache_dir,
         force_refresh=args.no_cache,
         lag_months=config.fundamental_lag_months,
+        use_market_data_v2=config.execution_mode == "next_close",
+        execution_mode=config.execution_mode,
     )
     print("\n데이터 수집 완료. 백테스트를 시작합니다...\n")
 

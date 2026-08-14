@@ -167,6 +167,19 @@ class Config:
     earnings_stability_years: int = 5
     katsenelson_use_growth: bool = False
     katsenelson_use_ncav: bool = False
+    execution_mode: str = "same_close"
+    allocation_mode: str = "equal_weight"
+
+    def __post_init__(self):
+        if self.execution_mode not in ("same_close", "next_close"):
+            raise ValueError(
+                "execution_mode must be exactly 'same_close' or 'next_close'"
+            )
+        if self.allocation_mode not in ("equal_weight", "market_cap_weight"):
+            raise ValueError(
+                "allocation_mode must be exactly 'equal_weight' or "
+                "'market_cap_weight'"
+            )
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -208,4 +221,5 @@ class Config:
             == "true",
             katsenelson_use_ncav=os.getenv("KATSENELSON_USE_NCAV", "false").lower()
             == "true",
+            execution_mode=os.getenv("EXECUTION_MODE", "same_close"),
         )
