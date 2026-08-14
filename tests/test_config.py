@@ -1,7 +1,11 @@
 import pandas as pd
 import pytest
 
-from config import get_korean_business_days
+from config import (
+    get_korean_business_days,
+    KRX_FALSE_POSITIVE_CLOSURES,
+    KRX_OFFICIAL_CLOSURES,
+)
 
 
 def _dates(start, end):
@@ -37,3 +41,65 @@ def test_cross_year_late_december_returns_chronological_unique_days():
     assert pd.Timestamp("2022-01-03") in days
     assert pd.Timestamp("2022-01-04") in days
     assert pd.Timestamp("2022-01-05") in days
+
+
+@pytest.mark.parametrize(
+    "date",
+    [
+        "2016-02-08", "2016-02-09", "2016-02-10",
+        "2016-04-13",
+        "2016-05-06",
+        "2016-09-14", "2016-09-15", "2016-09-16",
+        "2017-01-27", "2017-01-30",
+        "2017-05-03",
+        "2017-05-09",
+        "2017-10-02",
+        "2017-10-04", "2017-10-05", "2017-10-06",
+        "2018-06-13",
+        "2020-04-15",
+        "2020-08-17",
+        "2021-10-11",
+        "2022-03-09",
+        "2022-06-01",
+        "2023-10-02",
+        "2024-04-10",
+        "2024-10-01",
+        "2025-01-27",
+        "2025-03-03",
+        "2025-05-06",
+        "2025-06-03",
+        "2025-10-08",
+        "2026-06-03",
+    ],
+)
+def test_krx_official_closure_is_excluded(date):
+    days = _dates(f"{date[:4]}-01-01", f"{date[:4]}-12-31")
+    assert pd.Timestamp(date) not in days
+
+
+@pytest.mark.parametrize(
+    "date",
+    [
+        "2016-05-02",
+        "2016-10-10",
+        "2016-12-26",
+        "2017-01-02",
+        "2019-05-13",
+        "2020-03-02",
+        "2021-06-07",
+        "2022-05-02",
+        "2022-05-09",
+        "2022-12-26",
+        "2023-01-02",
+    ],
+)
+def test_krx_false_positive_remains_a_trading_day(date):
+    days = _dates(f"{date[:4]}-01-01", f"{date[:4]}-12-31")
+    assert pd.Timestamp(date) in days
+
+
+def test_krx_correction_layer_is_bounded_to_2016_2026():
+    for (y, m, d) in KRX_OFFICIAL_CLOSURES | KRX_FALSE_POSITIVE_CLOSURES:
+        assert pd.Timestamp("2016-01-01") <= pd.Timestamp(y, m, d) < pd.Timestamp(
+            "2026-07-01"
+        )

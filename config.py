@@ -88,6 +88,63 @@ KOREA_LUNAR_HOLIDAYS = {
 }
 
 
+# Official KRX calendar reconciliation (bounded to 2016-01-01 ~ 2026-06-30).
+# The fixed-holiday Sunday-substitute rule and the lunar-holiday table above
+# are not exact for this window, so reconcile against the official KRX
+# trading calendar:
+#   * KRX_OFFICIAL_CLOSURES: days the exchange closed but the rules miss
+#     (elections, temporary holidays, and substitute holidays not modeled).
+#   * KRX_FALSE_POSITIVE_CLOSURES: days the rules exclude but KRX traded
+#     (substitutes the exchange never observed).
+# The layer is intentionally bounded; outside this window the original rules
+# apply unchanged, so unknown future both-market zero snapshots stay
+# fail-closed (engine/manifest validation is untouched).
+KRX_OFFICIAL_CLOSURES = frozenset(
+    {
+        (2016, 2, 8), (2016, 2, 9), (2016, 2, 10),  # Seollal
+        (2016, 4, 13),  # legislative election
+        (2016, 5, 6),  # temporary holiday
+        (2016, 9, 14), (2016, 9, 15), (2016, 9, 16),  # Chuseok
+        (2017, 1, 27), (2017, 1, 30),  # Seollal
+        (2017, 5, 3),  # Buddha's Birthday
+        (2017, 5, 9),  # presidential election
+        (2017, 10, 2),  # temporary holiday
+        (2017, 10, 4), (2017, 10, 5), (2017, 10, 6),  # Chuseok
+        (2018, 6, 13),  # local election
+        (2020, 4, 15),  # legislative election
+        (2020, 8, 17),  # Liberation Day substitute
+        (2021, 10, 11),  # Hangul Day substitute
+        (2022, 3, 9),  # presidential election
+        (2022, 6, 1),  # local election
+        (2023, 10, 2),  # temporary holiday
+        (2024, 4, 10),  # legislative election
+        (2024, 10, 1),  # Armed Forces Day
+        (2025, 1, 27),  # temporary holiday
+        (2025, 3, 3),  # Independence Movement Day substitute
+        (2025, 5, 6),  # temporary holiday
+        (2025, 6, 3),  # KRX closure
+        (2025, 10, 8),  # Chuseok substitute
+        (2026, 6, 3),  # local election
+    }
+)
+
+KRX_FALSE_POSITIVE_CLOSURES = frozenset(
+    {
+        (2016, 5, 2),  # Labor Day substitute not observed
+        (2016, 10, 10),  # Hangul Day substitute not observed
+        (2016, 12, 26),  # Christmas substitute not observed
+        (2017, 1, 2),  # New Year substitute not observed
+        (2019, 5, 13),  # Buddha's Birthday substitute not observed
+        (2020, 3, 2),  # Independence Movement Day substitute not observed
+        (2021, 6, 7),  # Memorial Day substitute not observed
+        (2022, 5, 2),  # Labor Day substitute not observed
+        (2022, 5, 9),  # Buddha's Birthday substitute not observed
+        (2022, 12, 26),  # Christmas substitute not observed
+        (2023, 1, 2),  # New Year substitute not observed
+    }
+)
+
+
 def get_korean_business_days(start_date, end_date):
     start_yr = pd.Timestamp(start_date).year
     end_yr = pd.Timestamp(end_date).year
@@ -124,6 +181,15 @@ def get_korean_business_days(start_date, end_date):
         while year_end.weekday() >= 5 or year_end.strftime("%Y-%m-%d") in holiday_set:
             year_end -= pd.Timedelta(days=1)
         holiday_set.add(year_end.strftime("%Y-%m-%d"))
+    # Apply the bounded official-KRX reconciliation for the requested years:
+    # restore over-excluded trading days, then add the missing closures.
+    correction_years = range(start_yr, end_yr + 1)
+    for (y, m, d) in KRX_FALSE_POSITIVE_CLOSURES:
+        if y in correction_years:
+            holiday_set.discard(pd.Timestamp(y, m, d).strftime("%Y-%m-%d"))
+    for (y, m, d) in KRX_OFFICIAL_CLOSURES:
+        if y in correction_years:
+            holiday_set.add(pd.Timestamp(y, m, d).strftime("%Y-%m-%d"))
     return pd.date_range(
         start=start_date,
         end=end_date,
