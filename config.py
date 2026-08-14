@@ -116,6 +116,14 @@ def get_korean_business_days(start_date, end_date):
         for key in ["seollal", "chuseok", "buddha"]:
             for h in KOREA_LUNAR_HOLIDAYS.get(key, {}).get(year, []):
                 holiday_set.add(h)
+        # KRX year-end closure: the exchange closes on 12/31 when it is a
+        # trading day, otherwise on the preceding final trading day.  Scan
+        # backward from Dec 31 over weekends and dates already known to be
+        # holidays so each included year contributes exactly one closure.
+        year_end = pd.Timestamp(year, 12, 31)
+        while year_end.weekday() >= 5 or year_end.strftime("%Y-%m-%d") in holiday_set:
+            year_end -= pd.Timedelta(days=1)
+        holiday_set.add(year_end.strftime("%Y-%m-%d"))
     return pd.date_range(
         start=start_date,
         end=end_date,
