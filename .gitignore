@@ -6,3 +6,4 @@ __pycache__/
 results/phase*_run.txt
 results/phase1_after_fix.txt
 results/phase1_after_periodfix.txt
+.slim/deepwork/
