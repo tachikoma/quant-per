@@ -41,6 +41,28 @@ uv run python phase7_market_regime.py            # 시장조건·레짐/알파 �
 - 카스넬슨 계열(K1/K2/K3) 실행은 ~3분/전략, 전체 phase 재실행은 ~25분 소요
 - 백그라운드 실행 권장: `nohup uv run python phaseN_*.py > results/phaseN_run.txt 2>&1 &`
 
+### 미래 OOS 모니터링
+
+PBR 전략의 미래 데이터 성과를 **매월** 확인한다. 재튜닝 금지, 동결 파라미터 유지.
+
+```bash
+# 1) 신규 월 market_data 수집 후
+uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31
+```
+
+- **3개월 누적 음수** → STOP (과적합)
+- **MDD > 40%** → STOP (리스크 불가)
+- **2026-12-31**: 3개월 최소 임계값 — PBR 양수 여부가 존폐 기준
+- **2027-03-31**: 6개월 확정 — CAGR/MDD 의미 시작
+
+### 유니버스 실험 (Oracle 검토 완료)
+
+유니버스(시총 200억~1조, 중소형/KOSDAQ 편중)의 베타(-57%)가 절대 열위 원인.
+검증 프레임워크상 "데이터 품질" 범위로 허용. `VALIDATION_PLAN.md` 참조.
+
+- 4개 설정(기본/500B~/1T~/KOSPI-only 500B+) 사전 등록, 파라미터 동결
+- go/no-go: 최적 설정 CAGR < 12% → STOP, > 18% → 자본 배분 검토
+
 ### CLI 플래그
 
 ```bash
