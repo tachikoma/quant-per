@@ -51,9 +51,17 @@ def fetch_kospi_benchmark(
         return existing.loc[start_ts:end_ts]
 
     fetch_start = missing.min().strftime("%Y%m%d")
-    fetch_end = missing.max().strftime("%Y%m%d")
+    # 미래 날짜는 오늘까지로 제한 (pykrx는 미래 데이터 반환 불가)
+    today = pd.Timestamp.now().normalize()
+    effective_end = min(missing.max(), today)
+    if effective_end < missing.min():
+        # 전체 missing이 미래 → fetch 불필요
+        return existing.loc[start_ts:end_ts] if not existing.empty else pd.DataFrame()
+    fetch_end = effective_end.strftime("%Y%m%d")
 
     raw = stock.get_index_ohlcv_by_date(fetch_start, fetch_end, "1001")
+    if raw is None or raw.empty:
+        return existing.loc[start_ts:end_ts] if not existing.empty else pd.DataFrame()
     df_new = raw.reset_index()
     df_new["date"] = pd.to_datetime(df_new["날짜"])
     df_new = (

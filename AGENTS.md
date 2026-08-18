@@ -23,7 +23,10 @@ uv run ruff format           # 포매팅
 **판정 결과(2026-08-10)**: M2/K1/K2/K3 개발 중단, PBR만 조건부 계속.
 **재검증(2026-08-11)**: PBR `EXCLUDE_NEGATIVE_PER=true` 재동결로 OOS 폴드 4개 전부
 양수 + 폴드 간 종목선택 알파 일관 확인 — 절대 열위 원인은 유니버스(중소형 편중).
-잔여 게이트: 미래 OOS 체크포인트 확정. 전체 근거는 `VALIDATION_REPORT.md`.
+**Phase 2 완료(2026-08-18)**: 결측 종목 평가(4% 미만, PBR 영향 없음), 체결 시점 비교(
+v2 데이터 필요로 별도 작업 판정), report.py KOSPI 벤치마크 버그 수정.
+미래 OOS 체크포인트 재실행: PBR +2.62% (2026-08~18, 2.5개월).
+전체 근거는 `VALIDATION_REPORT.md`.
 
 ```bash
 uv run python phase1_reproducibility.py          # 재현성 (5개 전략, 2016-01~2026-06)
@@ -93,7 +96,8 @@ backtest.py → Config.from_env() → fetch_rebalancing_data() → run_backtest(
 
 ## 테스트
 
-- 실제 API 호출 없음, 합성 데이터로 테스트 (`_make_stock_rows` 헬퍼)
+- 180개 테스트 통과 (합성 데이터, API 호출 없음)
+- `_make_stock_rows` 헬퍼로 합성 데이터 생성
 - `zero_cost_config` fixture: 비용 0% 시나리오, `use_multi_factor=False`
 - 핵심 검증: cash 잔액 보존, 우선주 필터, 리밸런싱 동일가격 매도/매수
 - `tests/test_dart.py`: 공시일 look-ahead bias 방지 검증 (가짜 캐시로 merge_asof 동작 확인)
@@ -111,3 +115,4 @@ backtest.py → Config.from_env() → fetch_rebalancing_data() → run_backtest(
 - `engine.py` 최상단에 `pd.set_option('future.no_silent_downcasting', True)` 적용됨
 - DART 데이터는 2015년 이후만 제공 (fnlttSinglAcntAll 한계)
 - survivorship bias: 캐시된 market_data에 상장폐지 종목 포함 (pykrx가 과거 기준 상장 종목 반환), 다만 DART 재무제표 없는 상장폐지 종목은 카스넬슨 필터에서 탈락
+- pykrx 1.2.8+: `get_index_ohlcv_by_date` 컬럼명이 한글로 변경됨 (날짜, 시가, 고가, 저가, 종가, 거래량, 거래대금, 상장시가총액). report.py/engine.py는 이미 한글 컬럼명 사용

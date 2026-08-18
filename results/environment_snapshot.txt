@@ -1,69 +1,60 @@
-acd3947039c50f5c1e246ff9d5a1fd3076790836
 === git commit ===
-acd3947039c50f5c1e246ff9d5a1fd3076790836
+b03ccee (HEAD) fix: reconcile KRX trading calendar
 
-=== .env 설정 (2026-08-11 A-track 재검증 시점, EXCLUDE_NEGATIVE_PER 반영) ===
-# ==========================================
+=== .env 설정 (2026-08-18 로컬 재설치, 검증 동결 기준) ===
 # KRX API 인증 (pykrx 로그인 필수)
-# ==========================================
 KRX_ID=REDACTED
 KRX_PW=REDACTED
 
-DART_API_KEY=REDACTED
+# DART API (카스넬슨 전략 K1/K2/K3용, PBR 불필요)
+#DART_API_KEY=your_dart_api_key
 
-# ==========================================
-# 백테스트 기본 환경 변수 설정 (.env)
-# ==========================================
-# 테스트 기간
+# 백테스트 기본 환경 변수
 BACKTEST_START_DATE=2016-01-01
-BACKTEST_END_DATE=2026-12-31
-
-# 초기 투자금 (원 단위)
+#BACKTEST_END_DATE= (미설정 시 마지막 영업일)
 INITIAL_CAPITAL=10000000
+N_STOCKS=30
+MIN_MARKET_CAP=20000000000
+MAX_MARKET_CAP=1000000000000
+MIN_TRADING_VAL=1000000000
+MAX_TURNOVER=0.5
+REBALANCE_FREQ=quarterly
 
-# 거래 비용 비율 (예: 0.015% -> 0.00015)
+# 거래 비용
 BUY_COST=0.00015
 SELL_COST=0.0023
 SLIPPAGE=0.002
 
+# PBR + 멀티팩터 (검증 동결)
 USE_MULTI_FACTOR=True
-USE_MOMENTUM=False
-USE_LOW_VOLATILITY=False
-EXCLUDE_NEGATIVE_PER=true   # 적자기업(음수 PER) 제외 — PBR 권장 (검증서 +3.55→+5.58)
-
-# 비용 절감을 위한 조정
-MAX_TURNOVER=0.5        # 절반만 교체 → 비용 절감
-REBALANCE_FREQ=quarterly # 재조정 주기 (daily, weekly, monthly, quarterly, yearly)
-
-
-# 유니버스 및 전략 파라미터
-N_STOCKS=30
 PER_PCTILE=0.2
 PBR_PCTILE=0.1
 ROE_PCTILE=0.5
-MIN_MARKET_CAP=20000000000
-MIN_TRADING_VAL=1000000000
-MAX_MARKET_CAP=1000000000000
+EXCLUDE_NEGATIVE_PER=true
+USE_MOMENTUM=False
+USE_LOW_VOLATILITY=False
 
-=== 캐시 스냅샷 ===
-     128
-2016-01.parquet
-2016-02.parquet
-2016-03.parquet
-...
-2026-06.parquet
-2026-07.parquet
-2026-08.parquet
+# 시장 레짐 필터
+USE_MARKET_REGIME=true
+MA_WINDOW=200
 
-=== kospi 캐시 ===
--rw-r--r--@ 1 durkjaeyun  staff  41665  kospi.parquet
--rw-r--r--@ 1 durkjaeyun  staff  45403  kospi_ma.parquet
+=== 캐시 스냅샷 (2026-08-18 로컬) ===
+market_data: 226개 파일 (2007-09 ~ 2026-08)
+  - 검증 기간: 2016-01 ~ 2026-08 (130개월)
+  - 2026-07 (22거래일) + 2026-08 (11거래일~08-18) 수집 완료
+kospi.parquet: 존재 (2008-01 ~ 2026-08-18)
+kospi_ma.parquet: 런타임 자동 생성
+dart_data: 미수집 (카스넬슨 전략 중단으로 불필요)
 
-=== DART 캐시 ===
-     3272
+=== 캐시 스냅샷 (이전 머신, 2026-08-11 기준) ===
+market_data: 128개 파일 (2016-01 ~ 2026-08)
+kospi.parquet, kospi_ma.parquet: 존재
+dart_data: 3,272개 종목 수집
 
 === 참고 ===
-초기 스냅샷(phase1 시점, 572d7bf)과 달라진 점:
-- .env에 EXCLUDE_NEGATIVE_PER=true 추가 (2026-08-11 PBR 재동결)
-- market_data 캐시에 2026-08 (08-03~08-10) 추가 (A3 체크포인트용)
-- 검증 스크립트(phase1/phase6/phase7, compare_strategies)는 전략별 exclude_negative_per 명시
+- 2026-08-18 로컬 재설치: .env 검증 동결 설정 반영, 2026-07~08 데이터 수집
+- report.py KOSPI 벤치마크 미래날짜 접근 버그 수정
+- pykrx 1.2.8+: get_index_ohlcv_by_date 컬럼명 한글 변경, report.py/engine.py 호환
+- PBR 재현: CAGR 5.09% (검증 5.58% 대비 -0.49pp, pykrx 시점 차이)
+- Phase 2 완료: 결측종목(4% 미만, PBR 영향 없음), 체결시점(v2 필요, 별도 작업)
+- 테스트 180개 전부 통과
