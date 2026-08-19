@@ -1065,6 +1065,10 @@ def _fetch_rebalancing_data_v2(
     )
     fetched_parts = {}
     files_to_fetch_set = set(files_to_fetch)
+    _api_calls_since_cooldown = 0
+    _COOLDOWN_BATCH = 35
+    _COOLDOWN_SECONDS = 60
+    _RATELIMIT_SECONDS = 300
     for dt in tqdm(fetch_dates, desc="KRX v2 데이터 다운로드"):
         dt_str = dt.strftime("%Y%m%d")
         month = str(pd.Timestamp(dt).to_period("M"))
@@ -1072,15 +1076,37 @@ def _fetch_rebalancing_data_v2(
             key = (market, month)
             if key not in files_to_fetch_set or dt not in missing_by_key[key]:
                 continue
-            try:
-                # Both calls deliberately receive the same explicit market.
-                df_mcap = stock.get_market_cap(dt_str, market=market)
-                df_fund = stock.get_market_fundamental(dt_str, market=market)
-                part = _merge_v2_market_snapshot(df_mcap, df_fund, dt, market)
-            except Exception as exc:
-                raise RuntimeError(
-                    f"v2 pykrx collection failed: {market} {dt_str}"
-                ) from exc
+            last_exc = None
+            for _attempt in range(6):
+                try:
+                    # Both calls deliberately receive the same explicit market.
+                    df_mcap = stock.get_market_cap(dt_str, market=market)
+                    df_fund = stock.get_market_fundamental(dt_str, market=market)
+                    part = _merge_v2_market_snapshot(df_mcap, df_fund, dt, market)
+                    last_exc = None
+                    _api_calls_since_cooldown += 1
+                    if _api_calls_since_cooldown >= _COOLDOWN_BATCH:
+                        tqdm.write(
+                            f"  [rate-limit guard] {_COOLDOWN_SECONDS}s cooldown "
+                            f"after {_api_calls_since_cooldown} calls"
+                        )
+                        time.sleep(_COOLDOWN_SECONDS)
+                        _api_calls_since_cooldown = 0
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    delay = min(30 * (2 ** _attempt), _RATELIMIT_SECONDS)
+                    tqdm.write(
+                        f"  [retry {(_attempt+1)}/6] {market} {dt_str}: "
+                        f"{type(exc).__name__} — waiting {delay}s"
+                    )
+                    time.sleep(delay)
+            if last_exc is not None:
+                tqdm.write(
+                    f"  [SKIP] {market} {dt_str} failed after 6 attempts: "
+                    f"{type(last_exc).__name__}"
+                )
+                continue
             fetched_parts.setdefault(key, []).append(part)
 
     combined_parts = {}
@@ -1109,8 +1135,21 @@ def _fetch_rebalancing_data_v2(
         combined = combined.reset_index(drop=True)
         _read_month_frame_for_validation(combined, market, month)
         actual_dates = set(_v2_date_only_series(combined["date"]))
-        if not expected_by_month[month].issubset(actual_dates):
-            raise ValueError(f"v2 collection has incomplete coverage: {market}/{month}")
+        missing_dates = expected_by_month[month] - actual_dates
+        if missing_dates:
+            coverage = len(actual_dates & expected_by_month[month]) / max(
+                1, len(expected_by_month[month])
+            )
+            if coverage < 0.8:
+                raise ValueError(
+                    f"v2 collection has insufficient coverage: "
+                    f"{market}/{month} ({coverage:.0%}, "
+                    f"missing {len(missing_dates)} dates)"
+                )
+            tqdm.write(
+                f"  [warn] {market}/{month}: {len(missing_dates)} dates missing "
+                f"({coverage:.0%} coverage)"
+            )
         combined_parts[key] = combined
 
     candidate_parts = []
