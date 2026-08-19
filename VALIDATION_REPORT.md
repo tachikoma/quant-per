@@ -39,11 +39,15 @@
   적자기업이 저PER로 유입돼 성과를 **~2%p CAGR씩** 잠식 중. → `EXCLUDE_NEGATIVE_PER=true` 권장.
 - 기타: 벤치마크 미래값 정렬, KOSPI 캐시 버그(28s→0s), 레짐 NaN, DART 전멸 경고, lag 폴백 → 수치 불변.
 
-**Phase 2 완료 추가 항목 (2026-08-18)**:
+**Phase 2 완료 추가 항목 (2026-08-18~19)**:
 - **결측 종목 평가**: 10% 미만 커버 종목 138개 (4.0%) — 38개 상장폐지 + 100개 신규상장
   → PBR 필터 영향 없음 (데이터 없는 종목은 자동 탈락, 스코어링 불가)
-- **체결 시점 비교**: next_close 실행에 market_data_v2 필요, v1→v2 변환 불가 → 별도 작업 판정
+- **체결 시점 비교**: v2 market_data 수집(384개 날짜, KOSPI+KOSDAQ 분리) 후 next_close 백테스트 완료
+  - same_close CAGR +3.55% vs **next_close CAGR +1.39%** (CAGR -2.2%p, MDD -28→-35%)
+  - 결론: **same_close 유지** — 다음 거래일 체결은 성과를 훼손
+- **부분 교체 비중(to_keep drift)**: 평균 드리프트 -0.17pp, 추가 비용 0.04%/년 → 영향 미미
 - **report.py KOSPI 벤치마크 버그 수정**: 미래 날짜 접근 시 빈 DataFrame 처리 추가
+- **engine.py v2 수집 하드닝**: retry(6회, 지수 백오프) + rate-limit cooldown(35calls/60s) + 80% 커버리지 임계값
 
 ### 3. 기준선·MA200 분해 (Phase 3) ✅
 
