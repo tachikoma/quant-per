@@ -26,6 +26,7 @@ uv run ruff format           # 포매팅
 **Phase 2 완료(2026-08-18)**: 결측 종목 평가(4% 미만, PBR 영향 없음), 체결 시점 비교(
 v2 데이터 필요로 별도 작업 판정), report.py KOSPI 벤치마크 버그 수정.
 미래 OOS 체크포인트 재실행: PBR +2.62% (2026-08~18, 2.5개월).
+유니버스 Pre-check(2026-08-18): 3설정(A/B/C) STOP — 최적 CAGR 11.82% < 12%, 전 설정 KOSPI 언더퍼폼.
 전체 근거는 `VALIDATION_REPORT.md`.
 
 ```bash
