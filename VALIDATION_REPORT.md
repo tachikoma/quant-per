@@ -187,6 +187,23 @@
 - 단 A3 체크포인트는 예비 단계므로, 데이터가 쌓인 뒤 마지막 확정 OOS 게이트가 남음.
 - 절대 언더퍼폼 해소는 **유니버스 정교화**(데이터 품질 차원)에서만 허용 — 검증 원칙 유지.
 
+### A4. 유니버스 확대 Pre-check STOP (2026-08-18, `results/universe_precheck.csv`)
+
+절대 열위 원인(유니버스 베타 -57%) 해소를 위해 `universe_precheck.py`로
+시총 범위 상향 설정 3종을 파라미터 동결 상태로 실행 (캐시 전용, 2016-01~2026-06):
+
+| 설정 | 시총 | CAGR | MDD | 누적 | Alpha vs KOSPI |
+|------|------|------|-----|------|---------------|
+| A (기본) | 20B~1T | +3.54% | -57.2% | +43.9% | -294.4% |
+| B (확대) | 500B~10T | +9.49% | -50.5% | +158.5% | -179.9% |
+| **C (대형주)** | **1T~** | **+11.82%** | -54.2% | +222.2% | -116.2% |
+
+- **판정: STOP** — 최적 설정(C) CAGR 11.82% < 12% 임계값, 전 설정 KOSPI 언더퍼폼, MDD > 40%.
+- 시총 상향으로 CAGR·턴오버 개선 추세(A→B→C)는 확인되나 절대 수익 기준 미달.
+- **유니버스 확대 Phase 1~7 본실험 취소**. D(KOSPI only)는 v1 캐시에 market 컬럼이 없어
+  v2 수집 필요 — precheck에서 미실행.
+- 남은 게이트는 A3 미래 OOS 체크포인트(2026-12-31 3개월 임계값) 단일.
+
 ## 산출물
 
 - `results/phase1_reproducibility.csv` — 5개 전략 전체 기간
@@ -194,8 +211,10 @@
 - `results/phase4_cost_stress.csv`, `results/phase4_order_ratio.csv` — 비용·체결
 - `results/phase5_parameter_stability.csv` — 파라미터 그리드
 - `results/phase6_oos_folds.csv` — OOS 폴드 진단 (2026-08-11 재동결 반영)
-- `results/phase6_oos_checkpoint.csv` — 미래 OOS 체크포인트 (예비)
+- `results/phase6_oos_checkpoint.csv` — 미래 OOS 체크포인트 (A3, PBR +2.62% @2026-08-18)
 - `results/phase7_market_regime.csv` — 시장조건·레짐/알파 분해 (A2)
+- `results/universe_precheck.csv` — 유니버스 확대 pre-check (A4, STOP)
+- `universe_precheck.py` — 유니버스 pre-check 스크립트 (캐시 전용)
 - `phase1_reproducibility.py` ~ `phase6_oos.py`, `phase7_market_regime.py` — 각 Phase 재현 스크립트
 
 > phase3/4/5 산출물은 **2026-08-10 검증(재동결 전)** 기준이며, PBR 행은 이전 설정

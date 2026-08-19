@@ -31,6 +31,7 @@ pykrx 기반 KRX 실거래 데이터 + DART 재무제표로 가치투자/모멘�
 ├── phase5_parameter_stability.py # 파라미터 안정성 그리드
 ├── phase6_oos.py        # OOS 폴드 진단 + 미래 OOS 체크포인트
 ├── phase7_market_regime.py # 시장조건·레짐/알파 분해 (A2 재검증)
+├── universe_precheck.py   # 유니버스 확대 pre-check (캐시 전용, A4 STOP)
 ├── pyproject.toml       # 프로젝트 메타데이터 및 의존성
 ├── .env                 # 전략 파라미터 (KRX_ID, DART_API_KEY 등)
 └── .env.sample          # .env 예시 (secret 제외)
@@ -107,6 +108,7 @@ uv run python phase5_parameter_stability.py      # 파라미터 안정성 그리
 uv run python phase6_oos.py                      # OOS 폴드 진단
 uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31  # 미래 OOS (데이터 수집 후)
 uv run python phase7_market_regime.py            # 시장조건·레짐/알파 분해
+uv run python universe_precheck.py               # 유니버스 확대 pre-check (A/B/C, 캐시 전용)
 ```
 
 ## 엔진 동작 방식
@@ -184,4 +186,7 @@ PBR의 절대 열위는 종목선택 알파 부재가 아니라 **유니버스(�
 - **조건부 계속 → 2026-08-11 재검증으로 OOS 충족**: PBR — `EXCLUDE_NEGATIVE_PER=true`
   반영(재동결)으로 CAGR +3.55→+5.58% 및 **OOS 폴드 4개 전부 양수** 전환.
   MA200 독립적인 종목선택 알파 확인. 잔여 게이트: 미래 OOS 체크포인트 확정
-  (데이터 축적 후 재실행, `results/phase6_oos_checkpoint.csv` 현재 예비 +5.51%).
+  (2026-08-18 현재 누적 +2.62%, `results/phase6_oos_checkpoint.csv`).
+- **유니버스 확대 중단 (2026-08-18 pre-check)**: 시총 상향 3설정(A/B/C) 실행 결과
+  최적 CAGR 11.82% < 12% 임계값, 전 설정 KOSPI 언더퍼폼, MDD > 40% → **STOP**.
+  `universe_precheck.py`, `results/universe_precheck.csv` 참조. 12/31 checkpoint 대기.

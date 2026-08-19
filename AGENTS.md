@@ -56,13 +56,17 @@ uv run python phase6_oos.py --checkpoint 2026-08-01 2026-12-31
 - **2026-12-31**: 3개월 최소 임계값 — PBR 양수 여부가 존폐 기준
 - **2027-03-31**: 6개월 확정 — CAGR/MDD 의미 시작
 
-### 유니버스 실험 (Oracle 검토 완료)
+### 유니버스 실험 (Pre-check STOP)
 
 유니버스(시총 200억~1조, 중소형/KOSDAQ 편중)의 베타(-57%)가 절대 열위 원인.
-검증 프레임워크상 "데이터 품질" 범위로 허용. `VALIDATION_PLAN.md` 참조.
+유니버스 정교화는 검증 프레임워크상 "데이터 품질" 범위로 허용되나,
+**2026-08-18 pre-check에서 STOP 판정**: 최적 설정(C, 1T~) CAGR 11.82% < 12%,
+전 설정 KOSPI 대비 언더퍼폼, MDD > 40%. `VALIDATION_PLAN.md` 참조.
 
-- 4개 설정(기본/500B~/1T~/KOSPI-only 500B+) 사전 등록, 파라미터 동결
-- go/no-go: 최적 설정 CAGR < 12% → STOP, > 18% → 자본 배분 검토
+- pre-check 실행: `uv run python universe_precheck.py` (캐시 전용, A/B/C)
+- D(KOSPI only)는 v1 캐시에 market 컬럼 없어 v2 수집 필요
+- 결과: `results/universe_precheck.csv`
+- **결론: 유니버스 확대 Phase 1~7 본실험 취소 → 12/31 checkpoint 대기**
 
 ### CLI 플래그
 
