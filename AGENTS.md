@@ -23,14 +23,17 @@ uv run ruff format           # 포매팅
 **판정 결과(2026-08-10)**: M2/K1/K2/K3 개발 중단, PBR만 조건부 계속.
 **재검증(2026-08-11)**: PBR `EXCLUDE_NEGATIVE_PER=true` 재동결로 OOS 폴드 4개 전부
 양수 + 폴드 간 종목선택 알파 일관 확인 — 절대 열위 원인은 유니버스(중소형 편중).
-**Phase 2 완료(2026-08-18)**: 결측 종목 평가(4% 미만, PBR 영향 없음), 체결 시점 비교(
-v2 데이터 필요로 별도 작업 판정), report.py KOSPI 벤치마크 버그 수정.
+**Phase 2 완료(2026-08-19)**: 결측 종목 평가(4% 미만, PBR 영향 없음),
+체결 시점 비교 완료(next_close CAGR -2.2%p 하락 → same_close 유지 확정),
+부분교체 드리프트(0.04%/년, 미미), report.py KOSPI 벤치마크 버그 수정,
+engine.py v2 수집 하드닝(retry/rate-limit/커버리지 완화) 커밋.
 미래 OOS 체크포인트 재실행: PBR +2.62% (2026-08~18, 2.5개월).
 유니버스 Pre-check(2026-08-18): 3설정(A/B/C) STOP — 최적 CAGR 11.82% < 12%, 전 설정 KOSPI 언더퍼폼.
 전체 근거는 `VALIDATION_REPORT.md`.
 
 ```bash
 uv run python phase1_reproducibility.py          # 재현성 (5개 전략, 2016-01~2026-06)
+uv run python phase2_integrity.py                # 무결성 (next_close, v2 캐시 전용)
 uv run python phase3_baselines.py                # 기준선·MA200 분해 (동일유니버스 vs 전략)
 uv run python phase4_cost_stress.py              # 비용·체결 스트레스
 uv run python phase5_parameter_stability.py      # 파라미터 안정성 그리드
@@ -90,7 +93,8 @@ backtest.py → Config.from_env() → fetch_rebalancing_data() → run_backtest(
 - `run_backtest`는 `start_date`~`end_date`로 기간 필터링 후 백테스트 (기간 밖 데이터 제외, 빈 기간 시 ValueError)
 - 검증 워크플로우: `phase1~6_*.py` → `results/*.csv` (캐시 전용, pykrx 호출 없음)
 - 설정은 `.env`에서 python-dotenv 로딩
-- pykrx로 KRX 실거래 데이터 수집, `.cache/backtest/market_data/{YYYY-MM}.parquet`에 캐싱
+- pykrx로 KRX 실거래 데이터 수집, `.cache/backtest/market_data/{YYYY-MM}.parquet`에 캐싱 (v1, same_close 전용)
+- v2 데이터(`.cache/backtest/market_data_v2/{market}/{YYYY-MM}.parquet`): KOSPI/KOSDAQ 분리 저장, manifest.json, next_close 모드 전용
 - KOSPI 벤치마크는 `.cache/backtest/kospi.parquet` 증분 캐싱
 - KOSPI 이동평균 시장 레짐 필터 (`MA_WINDOW` 기본 200): 종가 < MA이면 전량 현금화, ≥ 이면 정상 리밸런싱 (`_fetch_kospi_for_ma()` → `.cache/backtest/kospi_ma.parquet`, `USE_MARKET_REGIME=false` 시 비활성)
 - DART 재무제표: corp_code(8)↔ticker(6) 매핑 `.cache/backtest/dart_corp_codes.parquet`, 연간 재무제표 `.cache/backtest/dart_data/{corp_code}.parquet`
@@ -114,6 +118,7 @@ backtest.py → Config.from_env() → fetch_rebalancing_data() → run_backtest(
 - `BACKTEST_END_DATE` 미설정 시 마지막 영업일 자동 계산
 - `FUNDAMENTAL_LAG_MONTHS`로 look-ahead bias 실험 가능 (실제 사용 시 CAGR 붕괴)
 - `EXCLUDE_NEGATIVE_PER=true`: 음수 PER(적자기업) 종목 제외. PBR은 true로 재동결 (CAGR +3.55→+5.58, OOS 폴드 4개 전부 양수). 모멘텀/카스넬슨은 false 유지(동결 보존)
+- `EXECUTION_MODE`: same_close(기본, 종가당일체결) 또는 next_close(종가신호+다음거래일체결). next_close는 v2 캐시 필요.
 - `USE_MARKET_REGIME`/`MA_WINDOW`: KOSPI 이동평균 레짐 필터 on-off / 기간(기본 200). M2는 MA200 의존(off 시 -8.12%)이나 PBR은 off에서 수익 상승(레짐 독립, MDD만 악화)
 - `PER_PCTILE`/`PBR_PCTILE`/`ROE_PCTILE`은 `use_multi_factor=True`일 때만 적용
   - `use_multi_factor=True`: PBR 하위 n% 필터 + PER/ROE/배당 스코어링

@@ -26,7 +26,9 @@ pykrx 기반 KRX 실거래 데이터 + DART 재무제표로 가치투자/모멘�
 ├── VALIDATION_PLAN.md   # 최종 검증 계획 (Phase 1~7)
 ├── VALIDATION_REPORT.md # 최종 판정서 (전략 계속/중단 판정)
 ├── phase1_reproducibility.py  # 재현성 검증 (캐시 전용)
+├── phase2_integrity.py        # 백테스트 무결성 검증 (next_close, v2 캐시 전용)
 ├── phase3_baselines.py  # 기준선·MA200 분해
+├── phase3_pbr_matched_controls.py  # PBR 대조군 매칭 제어
 ├── phase4_cost_stress.py # 비용·체결 스트레스
 ├── phase5_parameter_stability.py # 파라미터 안정성 그리드
 ├── phase6_oos.py        # OOS 폴드 진단 + 미래 OOS 체크포인트
@@ -76,6 +78,7 @@ cp .env.sample .env
 | `USE_MOMENTUM` | false | 12개월 모멘텀 팩터 사용 |
 | `USE_LOW_VOLATILITY` | false | 저변동성 팩터 사용 |
 | `EXCLUDE_NEGATIVE_PER` | false | 음수 PER(적자기업) 종목 제외 — **PBR은 true로 재동결 (CAGR +3.55→+5.58, OOS 폴드 4개 전부 양수)** |
+| `EXECUTION_MODE` | same_close | `same_close`(종가당일체결) / `next_close`(종가신호+다음거래일체결, v2 캐시 필요) |
 | `USE_MARKET_REGIME` | true | KOSPI 200일선 시장 레짐 필터 (false 시 항상 풀투자) |
 | `MA_WINDOW` | 200 | 시장 레짐 이동평균 기간 |
 | `USE_KATSENELSON` | false | 카스넬슨 가치투자 (DART 재무제표) |
@@ -124,6 +127,7 @@ uv run python universe_precheck.py               # 유니버스 확대 pre-check
    - KOSPI + KOSDAQ 전 종목
    - pykrx `get_market_cap` + `get_market_fundamental` (PER, PBR, EPS, BPS, DIV)
    - `lag_months` 설정 시 시작일을 앞당겨 과거 펀더멘털 데이터 확보
+   - v2 모드(`EXECUTION_MODE=next_close`): KOSPI/KOSDAQ 분리 수집, `.cache/backtest/market_data_v2/` 캐싱
 
 3. **DART 재무제표 수집** (`dart_data.py` + `collect_dart_data.py`)
    - `corpCode.xml` → corp_code(8) ↔ ticker(6) 매핑 캐싱
@@ -138,9 +142,10 @@ uv run python universe_precheck.py               # 유니버스 확대 pre-check
    - 시총/거래대금 필터링 → 전략별 필터/스코어링으로 종목 선정
    - **거래대금 기반 슬리피지**: 주문금액/일거래대금 × 0.5 (cap=SLIPPAGE)
    - **부분 리밸런싱**: `max_turnover` 이하로만 포트폴리오 교체 (비용 절감)
-   - **시장 레짐**: KOSPI 종가 < MA200(=`MA_WINDOW`)이면 전량 현금화, ≥ 이면 정상 리밸런싱 (`USE_MARKET_REGIME=false` 시 비활성)
-   - **음수 PER 제외**: `EXCLUDE_NEGATIVE_PER=true` 시 적자기업 제외 (기본 false — 이전 동작 유지)
-   - 상장폐지 시 보수적 가정 (원금 10% 회수)
+- **시장 레짐**: KOSPI 종가 < MA200(=`MA_WINDOW`)이면 전량 현금화, ≥ 이면 정상 리밸런싱 (`USE_MARKET_REGIME=false` 시 비활성)
+- **음수 PER 제외**: `EXCLUDE_NEGATIVE_PER=true` 시 적자기업 제외 (기본 false — 이전 동작 유지)
+- **체결 모드**: `EXECUTION_MODE=same_close`(기본) 종가당일체결 / `next_close` 종가신호+다음거래일체결 (v2 캐시 필수)
+- 상장폐지 시 보수적 가정 (원금 10% 회수)
 
 ### 스코어링 방식
 
