@@ -208,6 +208,15 @@
   v2 수집 필요 — precheck에서 미실행.
 - 남은 게이트는 A3 미래 OOS 체크포인트(2026-12-31 3개월 임계값) 단일.
 
+### A5. P2/P3 재검증 (2026-08-30, `EXCLUDE_NEGATIVE_PER=true` 재동결) ✅
+
+- **P2 Phase 5 재실행** (`phase5_parameter_stability.py`, 2016-01~2026-06, 캐시 전용, `.env` 재동결):
+  - PBR_종목수 4.31/5.09/5.09/5.09 spread **0.78pp** (이전 1.67pp), PBR_교체율 5.09/5.09/5.0/4.3 spread **0.79pp** (이전 0.74pp), PBR_리밸런싱 monthly 4.03/quarterly 5.09 spread **1.06pp** (이전 0.54pp) → **plateau 유지, 종목수 안정성 개선**
+  - M2/K1/K3는 DART 미수집으로 0.0 (카스넬슨, 개발 중단 무관). 결과 `results/phase5_parameter_stability.csv` 갱신.
+  - 판정 불변: PBR만 안정, K1/M2 불안정 (@oracle P2 필수 게이트 충족)
+- **P3 Universe Pre-check 재실행** (`universe_precheck.py --configs A B C`, regime off, 동일 기간):
+  - A 3.54% / B 9.49% / **C 11.82%** (이전과 동일) → **STOP 재확인** (최적 <12%, 전 설정 Alpha 음수, MDD>40%). 결과 `results/universe_precheck.csv` 갱신.
+
 ## 산출물
 
 - `results/phase1_reproducibility.csv` — 5개 전략 전체 기간

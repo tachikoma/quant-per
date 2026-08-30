@@ -29,6 +29,7 @@ uv run ruff format           # 포매팅
 engine.py v2 수집 하드닝(retry/rate-limit/커버리지 완화) 커밋.
 미래 OOS 체크포인트 재실행: PBR +2.62% (2026-08~18, 2.5개월).
 유니버스 Pre-check(2026-08-18): 3설정(A/B/C) STOP — 최적 CAGR 11.82% < 12%, 전 설정 KOSPI 언더퍼폼.
+**재검증(2026-08-30)**: P2 `phase5_parameter_stability.py` 재동결(`EXCLUDE_NEGATIVE_PER=true`) 재실행 — PBR spread 0.78/0.79/1.06pp plateau 유지(이전 1.67/0.74/0.54 대비 개선), P3 `universe_precheck.py` 재실행 동일 STOP(11.82% <12%) 재확인.
 전체 근거는 `VALIDATION_REPORT.md`.
 
 ```bash
